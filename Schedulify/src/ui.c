@@ -285,14 +285,18 @@ static void indent_by(int n)
     for (i = 0; i < n; i++) fputc(' ', stdout);
 }
 
-void ui_wrap(const char *text, int indent)
+/* The one word-wrapper everything else is built on.  `indent` is the column
+ * continuation lines start at; `col` is the column the cursor already sits
+ * at, so a caller that has printed a label, a prefix or a heading can have
+ * the rest of the text flow around it.  Prints neither a leading indent nor
+ * a trailing newline.  Returns the column it finished on. */
+static int wrap_body(const char *text, int indent, int col)
 {
-    int avail = g_width - indent - 1;
-    int col = 0;
+    int limit = g_width - 1;
     const char *p = text;
 
-    if (avail < 20) avail = 20;
-    indent_by(indent);
+    if (limit < indent + 20) limit = indent + 20;
+
     while (*p != '\0') {
         const char *word;
         int wlen;
@@ -303,15 +307,22 @@ void ui_wrap(const char *text, int indent)
         while (*p != '\0' && *p != ' ') p++;
         wlen = (int)(p - word);
 
-        if (col > 0 && col + 1 + wlen > avail) {
+        if (col > indent && col + 1 + wlen > limit) {
             fputc('\n', stdout);
             indent_by(indent);
-            col = 0;
+            col = indent;
         }
-        if (col > 0) { fputc(' ', stdout); col++; }
+        if (col > indent) { fputc(' ', stdout); col++; }
         fwrite(word, 1, (size_t)wlen, stdout);
         col += wlen;
     }
+    return col;
+}
+
+void ui_wrap(const char *text, int indent)
+{
+    indent_by(indent);
+    (void)wrap_body(text, indent, indent);
     fputc('\n', stdout);
 }
 
@@ -322,39 +333,21 @@ void ui_wrap_dim(const char *text, int indent)
     fputs(ui_c(C_RESET), stdout);
 }
 
+void ui_wrap_at(const char *text, int indent, int start_col)
+{
+    (void)wrap_body(text, indent, start_col);
+}
+
 
 /* Wraps a message to the output width, indenting continuation lines under
  * the prefix so "  !   some very long warning ..." stays readable. */
 static void msg_wrapped(UiColor color, const char *prefix, const char *text)
 {
     int indent = (int)strlen(prefix);
-    int avail = g_width - 1;
-    int col = indent;
-    const char *p = text;
-
-    if (avail < indent + 20) avail = indent + 20;
 
     fputs(ui_c(color), stdout);
     fputs(prefix, stdout);
-    while (*p != '\0') {
-        const char *word;
-        int wlen;
-
-        while (*p == ' ') p++;
-        if (*p == '\0') break;
-        word = p;
-        while (*p != '\0' && *p != ' ') p++;
-        wlen = (int)(p - word);
-
-        if (col > indent && col + 1 + wlen > avail) {
-            fputc('\n', stdout);
-            indent_by(indent);
-            col = indent;
-        }
-        if (col > indent) { fputc(' ', stdout); col++; }
-        fwrite(word, 1, (size_t)wlen, stdout);
-        col += wlen;
-    }
+    (void)wrap_body(text, indent, indent);
     printf("%s\n", ui_c(C_RESET));
 }
 #define DEFINE_MSG(fn, color, prefix)                      \

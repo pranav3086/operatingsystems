@@ -206,6 +206,17 @@ like a live session:
 printf '4\n2\n\n1\n3\n\n0\n' | ./bin/schedulify --no-color --ascii
 ```
 
+
+### Output width
+
+All prose — headings, notes, help text, menu descriptions, dot-leader metric
+lines — wraps to the configured width, so nothing runs off the edge at any
+width from 60 to 200. The column-aligned data tables have a fixed minimum:
+the six-way comparison table needs 91 columns and the process table 89, so on
+a terminal narrower than about 92 columns those two will be soft-wrapped by
+the terminal. The default width is detected from the terminal (falling back
+to 100) and can be set with `--width N` or from the Settings menu.
+
 ### Command line
 
 Any action flag runs non-interactively and skips the menu.

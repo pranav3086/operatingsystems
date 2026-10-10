@@ -25,24 +25,34 @@ static void pad(int n)
 
 #define wrap_print(text, indent) ui_wrap((text), (indent))
 
+/* "  Label ............. value", with the value wrapped under itself.  On a
+ * narrow terminal the dot leader shrinks first so the value keeps its room. */
 static void kv(const char *label, const char *fmt, ...)
 {
-    char val[96];
+    char val[192];
     va_list ap;
-    int dots;
+    int label_len = (int)strlen(label);
+    int leader = 32;
+    int dots, col;
 
     va_start(ap, fmt);
     vsnprintf(val, sizeof val, fmt, ap);
     va_end(ap);
 
-    dots = 32 - (int)strlen(label);
-    if (dots < 2) dots = 2;
+    if (leader > ui_term_width() - 28) leader = ui_term_width() - 28;
+    if (leader < label_len + 2) leader = label_len + 2;
+    dots = leader - label_len;
 
     printf("  %s%s%s ", ui_c(C_LABEL), label, ui_c(C_RESET));
     fputs(ui_c(C_DIM), stdout);
     ui_repeat(".", dots);
     fputs(ui_c(C_RESET), stdout);
-    printf(" %s%s%s\n", ui_c(C_VALUE), val, ui_c(C_RESET));
+    fputc(' ', stdout);
+
+    col = 2 + label_len + 1 + dots + 1;
+    fputs(ui_c(C_VALUE), stdout);
+    ui_wrap_at(val, col, col);
+    printf("%s\n", ui_c(C_RESET));
 }
 
 /* ---------------------------------------------------------- input table */
@@ -308,10 +318,17 @@ static void gantt_draw(const Schedule *sch, int t_limit)
         if (cells[i].width < mw) { cells[i].width = mw; widened++; }
     }
 
-    printf("\n  %sGantt chart%s  %s(%d character%s per time unit; the ruler "
-           "shows exact boundaries)%s\n",
-           ui_c(C_LABEL), ui_c(C_RESET), ui_c(C_DIM), scale,
-           (scale == 1) ? "" : "s", ui_c(C_RESET));
+    {
+        static const char HEADING[] = "Gantt chart";
+        char note[160];
+        snprintf(note, sizeof note,
+                 "(%d character%s per time unit; the ruler shows exact "
+                 "boundaries)", scale, (scale == 1) ? "" : "s");
+        printf("\n  %s%s%s  ", ui_c(C_LABEL), HEADING, ui_c(C_RESET));
+        fputs(ui_c(C_DIM), stdout);
+        ui_wrap_at(note, indent, indent + (int)sizeof HEADING - 1 + 2);
+        printf("%s\n", ui_c(C_RESET));
+    }
 
     k = 0;
     while (k < count) {

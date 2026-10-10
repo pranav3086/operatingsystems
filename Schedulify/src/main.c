@@ -76,9 +76,10 @@ static PromptResult pick_algorithm(AlgorithmId *out)
         char key[4];
         char text[180];
         snprintf(key, sizeof key, "%d", i + 1);
-        snprintf(text, sizeof text, "%-8s %-30s %s", info->abbrev,
-                 info->name, info->summary);
+        snprintf(text, sizeof text, "%-8s %s", info->abbrev,
+                 info->name);
         ui_menu_item(key, text);
+        ui_wrap_dim(info->summary, 6);
     }
     r = prompt_int("Algorithm", 1, ALGO_COUNT, &choice);
     if (r != PROMPT_OK) return r;
@@ -732,12 +733,9 @@ static void main_menu_draw(const App *app)
 
     ui_banner();
     if (app->ds.count > 0) {
-        printf("  %scurrent workload:%s %s%s%s  %s(%d process%s, quantum "
-               "%d)%s\n",
-               ui_c(C_DIM), ui_c(C_RESET), ui_c(C_OK), app->ds.name,
-               ui_c(C_RESET), ui_c(C_DIM), app->ds.count,
-               (app->ds.count == 1) ? "" : "es", app->quantum,
-               ui_c(C_RESET));
+        ui_info("current workload: %s  (%d process%s, quantum %d)",
+                app->ds.name, app->ds.count,
+                (app->ds.count == 1) ? "" : "es", app->quantum);
     } else {
         printf("  %sno workload loaded yet%s\n", ui_c(C_DIM), ui_c(C_RESET));
     }

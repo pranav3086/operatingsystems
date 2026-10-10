@@ -100,6 +100,13 @@ void ui_wrap(const char *text, int indent);
 /* Same, rendered dim -- used for the explanatory notes under a table. */
 void ui_wrap_dim(const char *text, int indent);
 
+/* Wraps `text` with continuation lines at column `indent`, assuming the
+ * cursor already sits at column `start_col`.  Prints no leading indent and
+ * no trailing newline, so a caller can close a color span and add its own.
+ * This is what lets a dot-leader label or a heading keep its value flowing
+ * in the same paragraph. */
+void ui_wrap_at(const char *text, int indent, int start_col);
+
 void ui_info(const char *fmt, ...);
 void ui_success(const char *fmt, ...);
 void ui_warn(const char *fmt, ...);
