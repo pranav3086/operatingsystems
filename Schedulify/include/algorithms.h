@@ -43,6 +43,11 @@ const char *algo_name(AlgorithmId id);
 const char *algo_abbrev(AlgorithmId id);
 bool        algo_needs_quantum(AlgorithmId id);
 
+/* Maps a short name ("fcfs", "srtf", "prio-p", "rr", ...) onto an id.
+ * Shared by the command line and the web API so both accept the same
+ * spellings. Case-insensitive. */
+bool        algo_from_name(const char *name, AlgorithmId *out);
+
 /* Individual schedulers.  Return false only on allocation failure. */
 bool sched_fcfs(Schedule *sch);
 bool sched_sjf(Schedule *sch);          /* non-preemptive, shortest burst  */

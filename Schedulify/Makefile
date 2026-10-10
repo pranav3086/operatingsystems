@@ -1,6 +1,7 @@
 # Schedulify -- CPU Scheduling Simulator (C11)
 #
 #   make            build bin/schedulify
+#   make web        build, serve the dashboard, open it in a browser
 #   make run        build and start the interactive menu
 #   make test       build and run the unit tests
 #   make asan       rebuild everything with AddressSanitizer + UBSan
@@ -26,6 +27,10 @@ OPT     ?= -O2
 CFLAGS  ?= $(CSTD) $(WARN) $(OPT) -Iinclude -Isrc
 LDFLAGS ?=
 LDLIBS  ?= -lm
+ifeq ($(OS),Windows_NT)
+  # ws2_32 for the dashboard sockets, shell32 to ask the OS to open a browser
+  LDLIBS += -lws2_32 -lshell32
+endif
 
 # ---- platform bits --------------------------------------------------------
 # On Windows, GNU make uses sh.exe when one is on PATH (Git Bash, MSYS2) and
@@ -58,17 +63,18 @@ CORE_SRC := src/process.c src/validate.c src/ui.c src/table.c \
             src/algorithms.c src/sched_fcfs.c src/sched_sjf.c \
             src/sched_priority.c src/sched_rr.c src/metrics.c \
             src/visualize.c src/compare.c src/csvio.c src/datasets.c \
-            src/stepmode.c
+            src/stepmode.c src/json.c src/http.c src/webapp.c \
+            src/serve.c
 APP_SRC  := $(CORE_SRC) src/main.c
 TEST_SRC := $(CORE_SRC) tests/test_util.c tests/test_validation.c \
-            tests/test_metrics.c tests/test_algorithms.c tests/test_csvio.c \
+            tests/test_metrics.c tests/test_algorithms.c tests/test_csvio.c tests/test_web.c \
             tests/test_main.c
 
 APP_OBJ  := $(APP_SRC:%.c=$(OBJ)/%.o)
 TEST_OBJ := $(TEST_SRC:%.c=$(OBJ)/%.o)
 DEPS     := $(APP_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
 
-.PHONY: all run test asan analyze demo clean help
+.PHONY: all web run test asan analyze demo clean help
 
 all: $(APP)
 
@@ -85,6 +91,10 @@ $(TESTS): $(TEST_OBJ)
 $(OBJ)/%.o: %.c
 	$(call MKDIR,$(dir $@))
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+# The visual dashboard: build, serve on 127.0.0.1, open a browser.
+web: $(APP)
+	$(call EXEC,$(APP)) --serve
 
 run: $(APP)
 	$(call EXEC,$(APP))
@@ -123,7 +133,7 @@ asan:
 analyze:
 	@echo "running the GCC static analyser over src/ and tests/ ..."
 	@for f in $(CORE_SRC) src/main.c $(filter tests/%,$(TEST_SRC)); do \
-	  $(CC) $(CSTD) -Iinclude -Isrc -Itests -fanalyzer -O1 \
+	  $(CC) $(CSTD) -Iinclude -Isrc -Itests -fanalyzer -Werror -O1 \
 	        -c $$f -o /dev/null || exit 1; \
 	done
 	@echo "static analysis clean"
@@ -141,6 +151,7 @@ clean:
 help:
 	@echo "Schedulify targets:"
 	@echo "  make           build bin/schedulify"
+	@echo "  make web       build, serve the dashboard, open a browser"
 	@echo "  make run       build and start the interactive menu"
 	@echo "  make test      build and run the unit tests"
 	@echo "  make asan      rebuild and run the tests under ASan/UBSan"

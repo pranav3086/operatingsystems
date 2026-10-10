@@ -5,5 +5,6 @@ void suite_validation(void);
 void suite_algorithms(void);
 void suite_metrics(void);
 void suite_csvio(void);
+void suite_web(void);
 
 #endif /* SCHEDULIFY_TEST_SUITES_H */

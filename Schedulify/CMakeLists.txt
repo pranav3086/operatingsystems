@@ -42,7 +42,11 @@ add_library(schedulify_core STATIC
   src/compare.c
   src/csvio.c
   src/datasets.c
-  src/stepmode.c)
+  src/stepmode.c
+  src/json.c
+  src/http.c
+  src/webapp.c
+  src/serve.c)
 
 target_include_directories(schedulify_core PUBLIC include src)
 
@@ -51,6 +55,11 @@ if(UNIX)
   if(M_LIBRARY)
     target_link_libraries(schedulify_core PUBLIC ${M_LIBRARY})
   endif()
+endif()
+
+# The dashboard needs sockets, and a way to ask the OS to open a browser.
+if(WIN32)
+  target_link_libraries(schedulify_core PUBLIC ws2_32 shell32)
 endif()
 
 # ---- strict warnings ------------------------------------------------------
@@ -107,6 +116,7 @@ add_executable(schedulify_tests
   tests/test_metrics.c
   tests/test_algorithms.c
   tests/test_csvio.c
+  tests/test_web.c
   tests/test_main.c)
 target_link_libraries(schedulify_tests PRIVATE schedulify_core)
 target_include_directories(schedulify_tests PRIVATE tests)
@@ -126,5 +136,8 @@ add_test(NAME cli_csv_import
                  ${CMAKE_CURRENT_SOURCE_DIR}/data/sample_processes.csv
                  --compare --no-color --ascii --width 100)
 add_test(NAME cli_help COMMAND schedulify --help)
+
+# The dashboard routes are exercised by the unit tests (suite "web"),
+# which call webapp_route() directly -- no socket, no browser.
 
 install(TARGETS schedulify RUNTIME DESTINATION bin)

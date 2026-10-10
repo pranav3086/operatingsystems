@@ -25,6 +25,7 @@ int main(void)
     suite_metrics();
     suite_algorithms();
     suite_csvio();
+    suite_web();
 
     return t_report();
 }

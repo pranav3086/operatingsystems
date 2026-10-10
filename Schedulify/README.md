@@ -1,12 +1,25 @@
 # Schedulify
 
-A CPU scheduling simulator written entirely in **C11**.
+An interactive CPU scheduling simulator with a **C11 engine** and a
+**visual browser dashboard**.
 
-Schedulify implements six classic scheduling policies, simulates them on a
-workload you supply, and prints an accurate text Gantt chart, a detailed
-per-process table and the full set of performance metrics. Every schedule and
-every number comes out of the C code in `src/` — there are no hard-coded
-example answers anywhere in the program.
+Set arrival times, burst times and priorities in the browser, pick one of six
+scheduling algorithms, and watch the processes get scheduled — a Gantt chart
+that fills in as a clock runs, per-process swimlanes, a live ready queue, and
+the scheduler's own reasoning replayed step by step.
+
+```
+make web        # or: ./bin/schedulify --serve
+```
+
+opens <http://127.0.0.1:8752/> in your browser.
+
+**Every schedule and every metric is computed in C.** The dashboard is
+presentation only: it POSTs the workload to the C engine, receives a finished
+timeline plus the metrics derived from it, and animates that. No scheduling
+decision and no metric is ever calculated in JavaScript. The same engine also
+drives a full terminal UI, so the browser is an interface onto it, not a
+reimplementation of it.
 
 ```
 ┌────────┬────────┬────┬────────┬────────────────┬────────────────────┐
@@ -20,8 +33,10 @@ example answers anywhere in the program.
 ## Contents
 
 - [What it does](#what-it-does)
+- [The dashboard](#the-dashboard)
 - [Build and run](#build-and-run)
 - [Using it](#using-it)
+- [HTTP API](#http-api)
 - [CSV format](#csv-format)
 - [Project layout](#project-layout)
 - [Scheduling assumptions](#scheduling-assumptions)
@@ -60,8 +75,9 @@ segment list, the process table with an averages row, the metric summary, a
 six-way comparison table that marks the winner in every column, and a
 plain-language verdict.
 
-**Modes** — run one algorithm, compare all six on the same workload, or walk
-through a run one scheduling decision at a time in the educational step mode.
+**Modes** — the browser dashboard; a menu-driven terminal UI; run one
+algorithm; compare all six on the same workload; or walk a run one scheduling
+decision at a time in the educational step mode.
 
 **Export** — the workload, one algorithm's full results, one algorithm's
 timeline, or the six-way comparison, all to CSV.
@@ -77,6 +93,53 @@ than every burst, and a single-process workload.
 
 ---
 
+## The dashboard
+
+```
+make web
+```
+
+builds the engine, starts a small HTTP server written in C (`src/http.c`) on
+the loopback interface, and opens the page in Chrome — falling back to your
+default browser if Chrome is not installed.
+
+**Set up the workload.** Add and remove processes, and edit each one's id,
+arrival time, burst time and priority in place. Or load any of the ten
+predefined examples, which are served from the same C table the terminal UI
+uses. Limits (`burst >= 1`, priority 0–99, …) come from the C headers, so the
+editor and the engine can never disagree about what is valid.
+
+**Pick an algorithm.** The six are listed with the exact selection and
+tie-break rule the C implementation follows; the quantum control appears only
+for Round Robin, because the registry says only Round Robin needs one.
+
+**Watch it run.** Press Simulate and the timeline plays:
+
+- a **Gantt chart** that fills left to right under a moving playhead, every
+  cell labelled with its process id and the exact boundary times on the ruler;
+- **per-process swimlanes**, one row per process, with an arrival marker and
+  that process's slices — so you can follow a single process across the whole
+  schedule;
+- a **live panel**: what is on the CPU right now and how much of its burst is
+  left, who is ready and waiting, and who has finished;
+- **metric tiles** and the **process table** for the finished schedule;
+- the **scheduler's decision log** — the C engine's own explanations
+  (`"t=2: PREEMPT P1 (remaining 5) and dispatch P2 (remaining 4) — strictly
+  smaller remaining time wins"`) highlighted in sync with the clock.
+
+Play, pause, step to the next or previous event, scrub the timeline, or change
+the speed. Space toggles playback and the arrow keys step.
+
+**Compare all six** puts every algorithm's metrics in one table with the best
+value in each column starred, above six timeline strips drawn on a shared
+scale — the quickest way to see that SRTF minimises waiting time while Round
+Robin minimises response time at the cost of extra switches.
+
+Light and dark themes both ship, following the system setting unless you
+override it.
+
+---
+
 ## Build and run
 
 You need a C11 compiler (GCC 5+ or Clang 3.6+) and either `make` or CMake 3.13+.
@@ -86,8 +149,9 @@ There are no third-party dependencies.
 
 ```sh
 cd Schedulify
-make                 # builds bin/schedulify
-./bin/schedulify     # start the interactive menu
+make web             # build, serve the dashboard, open a browser  <-- start here
+make                 # just build bin/schedulify
+./bin/schedulify     # the terminal menu instead of the dashboard
 
 make test            # build and run the unit tests
 make demo            # three non-interactive demos
@@ -111,13 +175,19 @@ Then, from PowerShell or `cmd.exe`:
 
 ```powershell
 cd Schedulify
-mingw32-make                 # builds bin\schedulify.exe
-.\bin\schedulify.exe         # start the interactive menu
+mingw32-make web             # build, serve the dashboard, open a browser
+mingw32-make                 # just build bin\schedulify.exe
+.\bin\schedulify.exe --serve # the dashboard, started by hand
+.\bin\schedulify.exe         # the terminal menu instead
 
 mingw32-make test            # build and run the unit tests
 mingw32-make analyze         # GCC static analyser
 mingw32-make clean
 ```
+
+The dashboard needs no network access, no package manager and no build step of
+its own: the page is plain HTML, CSS and JavaScript with no dependencies, and
+the server is the same C binary.
 
 The Makefile works whether `make` picks `cmd.exe` or a POSIX `sh` (Git Bash,
 MSYS2), so the same commands work from either shell.
@@ -222,6 +292,12 @@ to 100) and can be set with `--width N` or from the Settings menu.
 Any action flag runs non-interactively and skips the menu.
 
 ```
+The dashboard
+  --serve                 start the local web dashboard and open a browser
+  --port N                port to listen on (default 8752)
+  --no-browser            serve but do not open a browser
+  --web-root DIR          where index.html lives (auto-detected)
+
 Workload
   --csv FILE              load a workload from CSV
   --example N             load predefined example N (1..10)
@@ -251,6 +327,8 @@ Options
 Examples:
 
 ```sh
+./bin/schedulify --serve                    # the dashboard
+./bin/schedulify --serve --port 9000         # on another port
 ./bin/schedulify --example 2 --algo srtf
 ./bin/schedulify --csv data/sample_processes.csv --compare --quantum 3
 ./bin/schedulify --random 8:7 --algo rr --quantum 4 --ascii --no-color
@@ -258,6 +336,54 @@ Examples:
 ./bin/schedulify --csv data/classic_sjf_srtf.csv --compare \
                  --export-comparison out.csv
 ```
+
+---
+
+## HTTP API
+
+The dashboard is an ordinary client of a small JSON API, so you can drive the
+engine from `curl`, a notebook or your own front end.
+
+| Route | Method | Returns |
+|---|---|---|
+| `/api/algorithms` | GET | the six algorithms, their kinds and their exact tie-break rules, plus the validation limits |
+| `/api/examples` | GET | the ten predefined workloads |
+| `/api/simulate` | POST | one finished schedule: timeline, per-process stats, metrics and the decision trace |
+| `/api/compare` | POST | the same, for all six algorithms |
+
+Request body for both POST routes (`algorithm` is omitted for `/api/compare`):
+
+```json
+{
+  "algorithm": "srtf",
+  "quantum": 2,
+  "processes": [
+    { "id": "P1", "arrival": 0, "burst": 7, "priority": 2 },
+    { "id": "P2", "arrival": 2, "burst": 4, "priority": 1 }
+  ]
+}
+```
+
+```sh
+curl -s -X POST http://127.0.0.1:8752/api/simulate \
+     -H 'Content-Type: application/json' \
+     -d '{"algorithm":"srtf","processes":[
+          {"id":"P1","arrival":0,"burst":7},
+          {"id":"P2","arrival":2,"burst":4}]}'
+```
+
+Every field goes through the same `validate.c` predicates as keyboard and CSV
+input, so a bad request comes back as `400` with the same wording the terminal
+would print: `{"error":"process 1: burst time 0 is outside 1..10000 ..."}`.
+
+The JSON reader and writer are themselves written in C (`src/json.c`) — the
+rule that nothing about scheduling leaves C applies to the encoding too.
+
+**Security posture.** The listening socket is bound to `127.0.0.1` only, so
+the dashboard is never reachable from the network. Static files are served
+from the web root alone: paths containing `..`, absolute paths, drive letters
+and anything outside a small extension allow-list are refused before a file is
+ever opened.
 
 ---
 
@@ -310,7 +436,11 @@ Schedulify/
 │   ├── csvio.h             CSV import and export
 │   ├── datasets.h          predefined examples + random generator
 │   ├── stepmode.h          step-by-step educational mode
-│   └── ui.h                colors, box glyphs, headings, wrapping
+│   ├── ui.h                colors, box glyphs, headings, wrapping
+│   ├── json.h              JSON reader + writer (for the dashboard)
+│   ├── http.h              the tiny loopback HTTP server
+│   ├── webapp.h            dashboard routes: JSON in, C engine, JSON out
+│   └── serve.h             start the server, open a browser
 ├── src/
 │   ├── process.c           container and Schedule/Trace lifecycle
 │   ├── validate.c
@@ -327,7 +457,16 @@ Schedulify/
 │   ├── csvio.c
 │   ├── datasets.c
 │   ├── stepmode.c
+│   ├── json.c              JSON codec, in C
+│   ├── http.c              sockets (Winsock / BSD), request parsing
+│   ├── webapp.c            routes, Schedule <-> JSON, static files
+│   ├── serve.c             server startup and browser launch
 │   └── main.c              CLI parsing and the menu interface
+├── web/                    the dashboard (no dependencies, no build step)
+│   ├── index.html
+│   ├── style.css           validated palette, light + dark
+│   ├── app.js              presentation only -- no scheduling logic
+│   └── favicon.svg
 └── tests/
     ├── test_util.c/.h      tiny assertion framework + helpers
     ├── suites.h
@@ -335,6 +474,7 @@ Schedulify/
     ├── test_metrics.c      formulas + rejection of impossible timelines
     ├── test_algorithms.c   hand-calculated schedules for all six
     ├── test_csvio.c        import, export, round trip
+    ├── test_web.c          JSON codec + the dashboard's HTTP routes
     └── test_main.c         runner
 ```
 
@@ -569,7 +709,7 @@ preemptions**.
 ## Tests and checks
 
 ```sh
-make test            # 950 assertions across 4 suites
+make test            # 1162 assertions across 5 suites
 make analyze         # GCC static analyser over every source file
 make asan            # ASan + UBSan (Linux/macOS; see below)
 ctest --test-dir build --output-on-failure   # unit tests + 4 CLI smoke tests
@@ -600,6 +740,13 @@ The suites are:
   priority, surrounding whitespace, a UTF-8 BOM; rejection of every malformed
   shape with the right line number; the export→import round trip; and that
   the exported numbers match the computed ones.
+- **web** — the JSON reader (shapes, escapes, `\u`, integer strictness,
+  and ten malformed inputs that must be rejected rather than guessed at),
+  the writer (punctuation, nesting, escaping, round trip), and the dashboard
+  routes driven without a socket: the same hand-worked SRTF and Round Robin
+  timelines read back out of the JSON, eleven bad-request shapes that must
+  come back as `400` with a useful message, the method guards, and the
+  static-file path traversal defences.
 
 **On sanitizers:** MinGW-w64 on Windows ships no `libasan`/`libubsan`, so
 `-fsanitize=address` cannot link there. `make asan` detects this and tells you
@@ -652,6 +799,31 @@ doubling. Every allocation failure is propagated rather than ignored, and the
 scheduler entry points return `false` so the caller can report it and carry
 on. `Schedule`/`Dataset` are always safe to pass to their `_free` function,
 including after a failed initialisation.
+
+**The browser is a client, not a second implementation.** It would have been
+easy to port the six algorithms to JavaScript and skip the server. That is
+exactly what the project must not do: there would then be two schedulers to
+keep in agreement, and the C one — the one with the tests — would be the one
+nobody was looking at. Instead the page POSTs the workload and animates the
+reply. `web/app.js` carries a comment at the top saying so, and the only
+arithmetic in it is layout (time to percentage) and reading the C timeline to
+ask "what is on the CPU at t?".
+
+A useful consequence: the terminal UI and the dashboard cannot disagree.
+`--example 2 --algo srtf` prints avg turnaround 7.00, 5 context switches and
+2 preemptions, and the dashboard shows the same numbers because it is the same
+`metrics.c` on the same timeline.
+
+**Chart colour was computed, not chosen.** In a Gantt chart any two processes
+can end up adjacent, so a categorical palette would have to survive the
+all-pairs colour-blindness test — and only three hues do. Rather than cap the
+dashboard at three processes, identity is carried by **position** (one
+swimlane row per process) and by a **direct label on every cell**, and colour
+carries CPU *state* instead: one blue hue at two steps, resting and running.
+Lightness differences survive every type of colour vision, so the two states
+are always distinguishable, and no process is ever identified by hue alone.
+Idle is a neutral tone with a 45° hatch so it reads as "nothing ran" in print,
+in forced-colors mode and for colour-blind readers.
 
 **Presentation is isolated.** Every escape sequence and every non-ASCII glyph
 goes through `ui.c`, which picks a Unicode or ASCII glyph table and turns

@@ -18,6 +18,7 @@
 #include "datasets.h"
 #include "metrics.h"
 #include "process.h"
+#include "serve.h"
 #include "stepmode.h"
 #include "ui.h"
 #include "validate.h"
@@ -816,6 +817,13 @@ static void print_usage(void)
     printf("  --example N           load predefined example N (1..%d)\n",
            examples_count());
     printf("  --random N[:SEED]     generate N random processes\n");
+    printf("\nThe visual dashboard\n");
+    printf("  --serve               start the local web dashboard and\n");
+    printf("                        open it in a browser (alias --web)\n");
+    printf("  --port N              port to listen on (default %d)\n",
+           SERVE_DEFAULT_PORT);
+    printf("  --no-browser          serve but do not open a browser\n");
+    printf("  --web-root DIR        where index.html lives (auto-detected)\n");
     printf("\nActions (any of these skips the interactive menu)\n");
     printf("  --algo NAME           run one algorithm: fcfs, sjf, srtf,\n");
     printf("                        prio-np, prio-p, rr\n");
@@ -837,34 +845,11 @@ static void print_usage(void)
     printf("  -h, --help            this message\n");
     printf("  -V, --version         version only\n");
     printf("\nExamples\n");
+    printf("  schedulify --serve\n");
     printf("  schedulify --example 2 --algo srtf\n");
     printf("  schedulify --csv data/sample_processes.csv --compare "
            "--quantum 3\n");
     printf("  schedulify --random 8:7 --algo rr --quantum 4 --ascii\n");
-}
-
-static bool parse_algo_name(const char *s, AlgorithmId *out)
-{
-    struct { const char *name; AlgorithmId id; } map[] = {
-        { "fcfs",      ALGO_FCFS },
-        { "fifo",      ALGO_FCFS },
-        { "sjf",       ALGO_SJF },
-        { "sjn",       ALGO_SJF },
-        { "srtf",      ALGO_SRTF },
-        { "srt",       ALGO_SRTF },
-        { "prio-np",   ALGO_PRIORITY_NP },
-        { "priority",  ALGO_PRIORITY_NP },
-        { "prio",      ALGO_PRIORITY_NP },
-        { "prio-p",    ALGO_PRIORITY_P },
-        { "priority-p", ALGO_PRIORITY_P },
-        { "rr",        ALGO_RR },
-        { "roundrobin", ALGO_RR }
-    };
-    size_t i;
-    for (i = 0; i < sizeof map / sizeof map[0]; i++) {
-        if (strcmp(s, map[i].name) == 0) { *out = map[i].id; return true; }
-    }
-    return false;
 }
 
 int main(int argc, char **argv)
@@ -878,6 +863,10 @@ int main(int argc, char **argv)
     bool want_step = false;
     bool have_algo = false;
     AlgorithmId algo = ALGO_FCFS;
+    bool want_serve = false;
+    int  serve_port = SERVE_DEFAULT_PORT;
+    bool serve_open_browser = true;
+    const char *web_root = NULL;
     const char *export_results = NULL;
     const char *export_comparison = NULL;
     const char *export_workload = NULL;
@@ -911,6 +900,14 @@ int main(int argc, char **argv)
         if (strcmp(a, "--menu") == 0)     { force_menu = true; continue; }
         if (strcmp(a, "--compare") == 0)  { want_compare = true; continue; }
         if (strcmp(a, "--step") == 0)     { want_step = true; continue; }
+        if (strcmp(a, "--serve") == 0 || strcmp(a, "--web") == 0) {
+            want_serve = true;
+            continue;
+        }
+        if (strcmp(a, "--no-browser") == 0) {
+            serve_open_browser = false;
+            continue;
+        }
 
         if (strcmp(a, "--assumptions") == 0) {
             viz_assumptions();
@@ -961,7 +958,7 @@ int main(int argc, char **argv)
             continue;
         }
         if (strcmp(a, "--algo") == 0) {
-            if (!parse_algo_name(argv[++i], &algo)) {
+            if (!algo_from_name(argv[++i], &algo)) {
                 fprintf(stderr, "schedulify: unknown algorithm \"%s\"\n",
                         argv[i]);
                 dataset_free(&app.ds);
@@ -1029,6 +1026,18 @@ int main(int argc, char **argv)
             replace_dataset(&app, &fresh);
             continue;
         }
+        if (strcmp(a, "--port") == 0) {
+            if (!parse_int_range(argv[++i], 1024, 65535, &serve_port)) {
+                fprintf(stderr, "schedulify: --port needs 1024..65535\n");
+                dataset_free(&app.ds);
+                return 2;
+            }
+            continue;
+        }
+        if (strcmp(a, "--web-root") == 0) {
+            web_root = argv[++i];
+            continue;
+        }
         if (strcmp(a, "--export-results") == 0) {
             export_results = argv[++i];
             continue;
@@ -1046,6 +1055,15 @@ int main(int argc, char **argv)
                         "(try --help)\n", a);
         dataset_free(&app.ds);
         return 2;
+    }
+
+    /* ---- the web dashboard ---- */
+
+    if (want_serve) {
+        int rc = serve_dashboard(serve_port, web_root,
+                                 serve_open_browser, argv[0]) ? 0 : 1;
+        dataset_free(&app.ds);
+        return rc;
     }
 
     /* ---- batch actions ---- */

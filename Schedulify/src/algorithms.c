@@ -239,3 +239,39 @@ bool algo_run(Schedule *sch, const Dataset *ds, AlgorithmId algo, int quantum,
     }
     return true;
 }
+
+/* Case-insensitive name -> id.  The command line and the web API both go
+ * through this, so `--algo prio-p` and {"algorithm":"prio-p"} agree. */
+bool algo_from_name(const char *name, AlgorithmId *out)
+{
+    static const struct { const char *name; AlgorithmId id; } MAP[] = {
+        { "fcfs",       ALGO_FCFS },
+        { "fifo",       ALGO_FCFS },
+        { "sjf",        ALGO_SJF },
+        { "sjn",        ALGO_SJF },
+        { "srtf",       ALGO_SRTF },
+        { "srt",        ALGO_SRTF },
+        { "prio-np",    ALGO_PRIORITY_NP },
+        { "priority",   ALGO_PRIORITY_NP },
+        { "prio",       ALGO_PRIORITY_NP },
+        { "prio-p",     ALGO_PRIORITY_P },
+        { "priority-p", ALGO_PRIORITY_P },
+        { "rr",         ALGO_RR },
+        { "roundrobin", ALGO_RR }
+    };
+    char lower[32];
+    size_t i;
+
+    if (name == NULL || name[0] == '\0') return false;
+    if (strlen(name) >= sizeof lower) return false;
+    for (i = 0; name[i] != '\0'; i++) {
+        char c = name[i];
+        lower[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+    }
+    lower[i] = '\0';
+
+    for (i = 0; i < sizeof MAP / sizeof MAP[0]; i++) {
+        if (strcmp(lower, MAP[i].name) == 0) { *out = MAP[i].id; return true; }
+    }
+    return false;
+}

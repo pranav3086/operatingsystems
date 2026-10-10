@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schedulify — CPU Scheduling Simulator</title>
+<meta name="description" content="Interactive CPU scheduling dashboard. The schedule and every metric are computed by a C11 engine; this page animates the timeline it is sent.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div>
+      <h1>Schedulify</h1>
+      <p class="brand-sub">CPU scheduling simulator &middot; <span id="engine-version">engine v…</span></p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <p class="engine-note" title="The browser never computes a schedule.">
+      schedules &amp; metrics computed in <strong>C</strong>
+    </p>
+    <button id="theme-toggle" class="btn btn-ghost" type="button" aria-label="Switch colour theme">
+      <span id="theme-label">Auto</span>
+    </button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ─────────────── controls ─────────────── -->
+  <aside class="panel controls" aria-label="Simulation settings">
+
+    <section class="block">
+      <h2 class="block-title">Algorithm</h2>
+      <div id="algo-list" class="algo-list" role="radiogroup" aria-label="Scheduling algorithm"></div>
+      <p id="algo-rule" class="rule-text"></p>
+    </section>
+
+    <section class="block" id="quantum-block" hidden>
+      <h2 class="block-title">Time quantum</h2>
+      <div class="quantum-row">
+        <input type="range" id="quantum-range" min="1" max="12" value="2" aria-label="Time quantum slider">
+        <input type="number" id="quantum-input" min="1" max="1000" value="2" aria-label="Time quantum">
+      </div>
+      <p class="hint">Round Robin gives each process <code>min(quantum, remaining)</code> before moving on.</p>
+    </section>
+
+    <section class="block">
+      <div class="block-head">
+        <h2 class="block-title">Processes</h2>
+        <span id="proc-count" class="pill">0</span>
+      </div>
+
+      <div class="proc-editor" role="group" aria-label="Process list">
+        <div class="proc-head">
+          <span>ID</span>
+          <span title="Arrival time">Arr</span>
+          <span title="Burst time">Burst</span>
+          <span title="Priority — lower number is higher priority">Prio</span>
+          <span class="sr-only">Remove</span>
+        </div>
+        <div id="proc-rows"></div>
+      </div>
+
+      <div class="btn-row">
+        <button id="add-proc" class="btn btn-soft" type="button">+ Add process</button>
+        <button id="randomise" class="btn btn-soft" type="button">Randomise</button>
+      </div>
+      <p class="hint">Lower priority number = higher priority. Burst must be at least 1.</p>
+    </section>
+
+    <section class="block">
+      <h2 class="block-title">Load an example</h2>
+      <select id="example-select" aria-label="Predefined example">
+        <option value="">Choose a predefined workload…</option>
+      </select>
+      <p id="example-desc" class="hint"></p>
+    </section>
+
+    <div class="run-row">
+      <button id="run" class="btn btn-primary" type="button">Simulate</button>
+      <button id="compare" class="btn btn-soft" type="button">Compare all six</button>
+    </div>
+    <p id="error" class="error" role="alert" hidden></p>
+  </aside>
+
+  <!-- ─────────────── results ─────────────── -->
+  <section class="results" aria-label="Simulation results">
+
+    <div id="empty-state" class="panel empty-state">
+      <h2>Set up a workload, then press <em>Simulate</em></h2>
+      <p>
+        The page sends your processes to the C engine over HTTP. The engine
+        runs the real scheduler, derives every metric from the execution
+        timeline, and sends back the finished schedule — which is what the
+        animation below replays.
+      </p>
+      <p class="hint">Nothing on this page computes a scheduling decision.</p>
+    </div>
+
+    <div id="result-view" hidden>
+
+      <!-- playback -->
+      <div class="panel playback">
+        <div class="playback-controls">
+          <button id="play" class="btn btn-primary btn-icon" type="button" aria-label="Play">
+            <span id="play-icon">▶</span><span id="play-text">Play</span>
+          </button>
+          <button id="step-back" class="btn btn-soft btn-icon" type="button" aria-label="Previous event">⏮</button>
+          <button id="step-fwd" class="btn btn-soft btn-icon" type="button" aria-label="Next event">⏭</button>
+          <button id="reset-clock" class="btn btn-ghost btn-icon" type="button" aria-label="Back to the start">↺</button>
+
+          <label class="speed">
+            <span>Speed</span>
+            <input type="range" id="speed" min="1" max="20" value="4" aria-label="Playback speed">
+            <output id="speed-out">4×</output>
+          </label>
+
+          <div class="clock" aria-live="off">
+            <span class="clock-label">t =</span>
+            <output id="clock-out" class="clock-value">0</output>
+            <span id="clock-end" class="clock-total">/ 0</span>
+          </div>
+        </div>
+        <input type="range" id="scrub" min="0" max="100" value="0" step="0.1"
+               class="scrub" aria-label="Scrub through the timeline">
+      </div>
+
+      <!-- live state -->
+      <div class="panel live">
+        <div class="live-cpu">
+          <h3 class="micro-title">CPU at t=<span id="live-t">0</span></h3>
+          <div id="cpu-now" class="cpu-now">—</div>
+        </div>
+        <div class="live-queue">
+          <h3 class="micro-title">Ready, waiting for the CPU</h3>
+          <div id="ready-queue" class="chips" aria-live="polite"></div>
+        </div>
+        <div class="live-done">
+          <h3 class="micro-title">Finished</h3>
+          <div id="done-list" class="chips"></div>
+        </div>
+      </div>
+
+      <!-- gantt -->
+      <figure class="panel chart">
+        <figcaption>
+          <h2 id="gantt-title">Execution timeline</h2>
+          <p id="gantt-sub" class="chart-sub"></p>
+        </figcaption>
+
+        <div class="legend" aria-hidden="false">
+          <span class="legend-item"><i class="sw sw-run"></i>on the CPU</span>
+          <span class="legend-item"><i class="sw sw-done"></i>already executed</span>
+          <span class="legend-item"><i class="sw sw-idle"></i>CPU idle</span>
+          <span class="legend-item"><i class="sw sw-pre"></i>preemption</span>
+        </div>
+
+        <div id="gantt-wrap" class="gantt-wrap">
+          <div id="gantt" class="gantt" role="img" aria-label="Gantt chart of the schedule"></div>
+          <div id="ruler" class="ruler"></div>
+        </div>
+
+        <h3 class="micro-title spaced">Per-process view</h3>
+        <div id="lanes" class="lanes"></div>
+      </figure>
+
+      <!-- metrics -->
+      <section class="panel" aria-labelledby="metrics-title">
+        <h2 id="metrics-title" class="block-title">Metrics for the finished schedule</h2>
+        <div id="tiles" class="tiles"></div>
+      </section>
+
+      <!-- process table -->
+      <section class="panel" aria-labelledby="table-title">
+        <h2 id="table-title" class="block-title">Process table</h2>
+        <div class="table-scroll">
+          <table id="proc-table" class="data">
+            <thead>
+              <tr>
+                <th scope="col">Process</th><th scope="col">Arrival</th>
+                <th scope="col">Burst</th><th scope="col">Prio</th>
+                <th scope="col">Start</th><th scope="col">Finish</th>
+                <th scope="col">Turnaround</th><th scope="col">Waiting</th>
+                <th scope="col">Response</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+            <tfoot></tfoot>
+          </table>
+        </div>
+        <p class="hint">
+          Turnaround = Finish − Arrival &middot; Waiting = Turnaround − Burst
+          &middot; Response = Start − Arrival
+        </p>
+      </section>
+
+      <!-- trace -->
+      <section class="panel" aria-labelledby="trace-title">
+        <h2 id="trace-title" class="block-title">
+          Scheduler decisions
+          <span class="hint-inline">— the C engine's own reasoning, replayed in step</span>
+        </h2>
+        <ol id="trace" class="trace"></ol>
+      </section>
+
+    </div><!-- /result-view -->
+
+    <!-- comparison -->
+    <section id="compare-view" class="panel" hidden aria-labelledby="cmp-title">
+      <h2 id="cmp-title" class="block-title">All six algorithms on this workload</h2>
+      <div class="table-scroll">
+        <table id="cmp-table" class="data">
+          <thead>
+            <tr>
+              <th scope="col">Algorithm</th><th scope="col">Avg turnaround</th>
+              <th scope="col">Avg waiting</th><th scope="col">Avg response</th>
+              <th scope="col">CPU util %</th><th scope="col">Throughput</th>
+              <th scope="col">Switches</th><th scope="col">Preemptions</th>
+              <th scope="col">Makespan</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="hint">
+        ★ marks the best value in a column, including ties. Makespan, utilisation
+        and idle time match across work-conserving algorithms when the CPU never
+        idles — the differences live in the averages and the switch counts.
+      </p>
+      <div id="cmp-charts" class="cmp-charts"></div>
+    </section>
+
+  </section>
+</main>
+
+<footer class="footer">
+  <p>
+    Schedulify — scheduling algorithms, metrics and the execution timeline are
+    implemented in C11 (<code>src/sched_*.c</code>, <code>src/metrics.c</code>).
+    This page is presentation only.
+  </p>
+</footer>
+
+<div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
