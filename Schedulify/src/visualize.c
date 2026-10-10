@@ -324,9 +324,9 @@ static void gantt_draw(const Schedule *sch, int t_limit)
         snprintf(note, sizeof note,
                  "(%d character%s per time unit; the ruler shows exact "
                  "boundaries)", scale, (scale == 1) ? "" : "s");
-        printf("\n  %s%s%s  ", ui_c(C_LABEL), HEADING, ui_c(C_RESET));
+        printf("\n  %s%s%s ", ui_c(C_LABEL), HEADING, ui_c(C_RESET));
         fputs(ui_c(C_DIM), stdout);
-        ui_wrap_at(note, indent, indent + (int)sizeof HEADING - 1 + 2);
+        ui_wrap_at(note, indent, indent + (int)sizeof HEADING);
         printf("%s\n", ui_c(C_RESET));
     }
 
