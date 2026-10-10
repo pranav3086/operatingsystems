@@ -181,8 +181,7 @@ static PromptResult menu_examples(App *app)
         snprintf(key, sizeof key, "%d", i + 1);
         snprintf(text, sizeof text, "%s", example_name(i));
         ui_menu_item(key, text);
-        printf("      %s%s%s\n", ui_c(C_DIM), example_description(i),
-               ui_c(C_RESET));
+        ui_wrap_dim(example_description(i), 6);
     }
 
     r = prompt_int("Example", 1, examples_count(), &choice);

@@ -218,12 +218,12 @@ void ui_banner(void)
     fputs(b->tl, stdout); ui_repeat(b->h, w); fputs(b->tr, stdout);
     fputc('\n', stdout);
 
-    pad = w - (int)strlen(name) - 2;
+    pad = w - (int)strlen(name) - 1;
     if (pad < 0) pad = 0;
     printf("%s %s%s%s%*s%s\n", b->v, ui_c(C_BOLD), name, ui_c(C_TITLE),
            pad, "", b->v);
 
-    pad = w - (int)strlen(tag) - 2;
+    pad = w - (int)strlen(tag) - 1;
     if (pad < 0) pad = 0;
     printf("%s %s%s%s%*s%s\n", b->v, ui_c(C_DIM), tag, ui_c(C_TITLE),
            pad, "", b->v);
@@ -322,6 +322,41 @@ void ui_wrap_dim(const char *text, int indent)
     fputs(ui_c(C_RESET), stdout);
 }
 
+
+/* Wraps a message to the output width, indenting continuation lines under
+ * the prefix so "  !   some very long warning ..." stays readable. */
+static void msg_wrapped(UiColor color, const char *prefix, const char *text)
+{
+    int indent = (int)strlen(prefix);
+    int avail = g_width - 1;
+    int col = indent;
+    const char *p = text;
+
+    if (avail < indent + 20) avail = indent + 20;
+
+    fputs(ui_c(color), stdout);
+    fputs(prefix, stdout);
+    while (*p != '\0') {
+        const char *word;
+        int wlen;
+
+        while (*p == ' ') p++;
+        if (*p == '\0') break;
+        word = p;
+        while (*p != '\0' && *p != ' ') p++;
+        wlen = (int)(p - word);
+
+        if (col > indent && col + 1 + wlen > avail) {
+            fputc('\n', stdout);
+            indent_by(indent);
+            col = indent;
+        }
+        if (col > indent) { fputc(' ', stdout); col++; }
+        fwrite(word, 1, (size_t)wlen, stdout);
+        col += wlen;
+    }
+    printf("%s\n", ui_c(C_RESET));
+}
 #define DEFINE_MSG(fn, color, prefix)                      \
     void fn(const char *fmt, ...)                          \
     {                                                      \
@@ -330,8 +365,7 @@ void ui_wrap_dim(const char *text, int indent)
         va_start(ap, fmt);                                 \
         vsnprintf(buf, sizeof buf, fmt, ap);               \
         va_end(ap);                                        \
-        printf("%s%s%s%s\n", ui_c(color), prefix, buf,      \
-               ui_c(C_RESET));                             \
+        msg_wrapped((color), (prefix), buf);         \
     }
 
 DEFINE_MSG(ui_info,    C_VALUE, "  ")
