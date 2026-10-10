@@ -1,0 +1,25 @@
+# build output
+build/
+bin/
+*.o
+*.d
+*.exe
+*.obj
+*.ilk
+*.pdb
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+cmake-build/
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+
+# files produced by the exporters and by the test suite
+workload.csv
+comparison.csv
+results_*.csv
+timeline_*.csv
+schedulify_test_*.csv

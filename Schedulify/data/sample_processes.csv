@@ -1,0 +1,15 @@
+# Schedulify sample workload
+# Columns: id,arrival,burst,priority
+# A lower priority number means a higher priority.
+#
+# Staggered arrivals, a wide spread of burst times and repeated priorities,
+# so that all six algorithms produce visibly different schedules.
+id,arrival,burst,priority
+P1,0,6,2
+P2,1,8,1
+P3,2,7,3
+P4,3,3,1
+P5,6,4,4
+P6,10,5,2
+P7,12,2,0
+P8,15,9,3

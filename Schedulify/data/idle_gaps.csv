@@ -1,0 +1,8 @@
+# Arrivals spread far apart, so the CPU goes idle between them and
+# utilization drops below 100%.  Useful for checking that idle time is
+# charged to the observation window and never to a process's waiting time.
+id,arrival,burst,priority
+P1,0,3,2
+P2,7,2,1
+P3,9,4,3
+P4,20,2,2
