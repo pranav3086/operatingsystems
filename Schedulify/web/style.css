@@ -255,6 +255,11 @@ code {
 .trace::-webkit-scrollbar-thumb:hover { background: var(--ink-muted); }
 
 .results { display: grid; gap: 18px; min-width: 0; }
+/* Grid items default to min-width:auto, so a wide table (the six-way
+ * comparison) would push its panel past the column and give the whole page
+ * a horizontal scrollbar. Letting items shrink hands the overflow back to
+ * .table-scroll, where it belongs. */
+.results > *, .controls > * { min-width: 0; }
 
 .block { display: grid; gap: 10px; }
 .block-head { display: flex; align-items: center; justify-content: space-between; }
