@@ -24,7 +24,7 @@ typedef enum {
     C_BOLD,
     C_DIM,
     C_TITLE,     /* bright cyan                                            */
-    C_HEADING,   /* bright white on blue-ish                               */
+    C_HEADING,   /* bright white                                           */
     C_LABEL,     /* yellow                                                 */
     C_VALUE,     /* bright white                                           */
     C_OK,        /* green                                                  */

@@ -819,9 +819,17 @@ can end up adjacent, so a categorical palette would have to survive the
 all-pairs colour-blindness test — and only three hues do. Rather than cap the
 dashboard at three processes, identity is carried by **position** (one
 swimlane row per process) and by a **direct label on every cell**, and colour
-carries CPU *state* instead: one blue hue at two steps, resting and running.
-Lightness differences survive every type of colour vision, so the two states
-are always distinguishable, and no process is ever identified by hue alone.
+carries CPU *state* instead: one red hue at three lightness steps -- pending,
+executed, on the CPU. Lightness differences survive every type of colour
+vision, so the three states are always distinguishable, and no process is ever
+identified by hue alone. The steps clear the ordinal gate against the actual
+page surfaces in both themes, and the gaps are set wider than the minimum
+because a bare-minimum step was hard to read at legend-swatch size.
+
+Two knock-on decisions once the accent became red: preemption markers are ink
+rather than red (a red marker would vanish into the red fills it sits
+between), and "finished" is a neutral chip with a check glyph rather than
+green, so the page never puts red and green side by side.
 Idle is a neutral tone with a 45° hatch so it reads as "nothing ran" in print,
 in forced-colors mode and for colour-blind readers.
 
