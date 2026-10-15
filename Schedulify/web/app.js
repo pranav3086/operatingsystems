@@ -30,6 +30,10 @@ const el = (tag, cls, text) => {
   return n;
 };
 
+/* The stylesheet staggers entrance animations off --i; it clamps the
+ * value itself, so this only has to hand over the index. */
+const stagger = (node, i) => { node.style.setProperty('--i', String(i)); return node; };
+
 const fmt = (v, dp = 2) =>
   (typeof v === 'number' && isFinite(v)) ? v.toFixed(dp) : '—';
 
@@ -148,8 +152,9 @@ function renderAlgorithms() {
   const host = $('#algo-list');
   host.textContent = '';
 
-  state.algorithms.forEach((a) => {
+  state.algorithms.forEach((a, i) => {
     const b = el('button', 'algo');
+    stagger(b, i);
     b.type = 'button';
     b.setAttribute('role', 'radio');
     b.setAttribute('aria-checked', String(a.slug === state.algo));
@@ -266,6 +271,12 @@ function buildChart() {
 
   $('#clock-end').textContent = `/ ${r.window.end}`;
 
+  /* One grid rule per unit of time, inherited by the Gantt and the
+   * swimlanes alike. Layout arithmetic over the window the engine
+   * reported -- it decides nothing about the schedule. */
+  const span = r.window.end - r.window.start;
+  $('.chart').style.setProperty('--unit', span > 0 ? `${100 / span}%` : '100%');
+
   buildGantt();
   buildLanes();
   buildRuler();
@@ -306,7 +317,7 @@ function buildGantt() {
   const r = state.result;
 
   r.segments.forEach((s, i) => {
-    const node = el('div', 'seg' + (s.idle ? ' idle' : ''));
+    const node = stagger(el('div', 'seg' + (s.idle ? ' idle' : '')), i);
     node.style.left = `${pct(s.start)}%`;
     node.style.width = `${pct(s.end) - pct(s.start)}%`;
     node.dataset.seg = String(i);
@@ -329,7 +340,7 @@ function buildGantt() {
     const proc = r.processes.find((p) => p.id === s.id);
     const next = r.segments.slice(i + 1).find((x) => !x.idle);
     if (proc && next && next.id !== s.id && executed[s.id] < proc.burst) {
-      const m = el('div', 'marker');
+      const m = stagger(el('div', 'marker'), i);
       m.style.left = `${pct(s.end)}%`;
       m.title = `${s.id} preempted at t=${s.end} with ${proc.burst - executed[s.id]} unit(s) left`;
       host.append(m);
@@ -346,8 +357,8 @@ function buildLanes() {
   host.textContent = '';
   const r = state.result;
 
-  r.processes.forEach((p) => {
-    const lane = el('div', 'lane');
+  r.processes.forEach((p, i) => {
+    const lane = stagger(el('div', 'lane'), i);
     const name = el('div', 'lane-name');
     name.append(el('span', null, p.id));
     name.append(document.createElement('br'));
@@ -399,7 +410,7 @@ function buildRuler() {
     const isEdge = i === 0 || i === times.length - 1;
     if (!isEdge && x - lastX < minGap) return;
     lastX = x;
-    const tick = el('div', 'tick', String(t));
+    const tick = stagger(el('div', 'tick', String(t)), i);
     tick.style.left = `${pct(t)}%`;
     host.append(tick);
   });
@@ -422,8 +433,8 @@ function buildTiles() {
     ['Makespan',       String(m.totalTime), 'units', `t=${state.result.window.start} → ${state.result.window.end}`]
   ];
 
-  tiles.forEach(([label, value, unit, note]) => {
-    const t = el('div', 'tile');
+  tiles.forEach(([label, value, unit, note], i) => {
+    const t = stagger(el('div', 'tile'), i);
     t.append(el('div', 'tile-label', label));
     const v = el('div', 'tile-value', value);
     if (unit) v.append(el('span', 'tile-unit', unit));
@@ -440,8 +451,8 @@ function buildTable() {
   tf.textContent = '';
   const r = state.result;
 
-  r.processes.forEach((p) => {
-    const tr = el('tr');
+  r.processes.forEach((p, i) => {
+    const tr = stagger(el('tr'), i);
     tr.dataset.pid = p.id;
     [p.id, p.arrival, p.burst, p.priority, p.start, p.completion,
      p.turnaround, p.waiting, p.response].forEach((v) => {
@@ -463,7 +474,7 @@ function buildTrace() {
   const host = $('#trace');
   host.textContent = '';
   state.result.trace.forEach((ev, i) => {
-    const li = el('li');
+    const li = stagger(el('li'), i);
     li.dataset.time = String(ev.time);
     li.dataset.i = String(i);
     li.append(el('span', 't', `t=${ev.time}`));
@@ -562,33 +573,19 @@ function paintLive(t, cur) {
     cpu.textContent = `${cur.id} running — ${num(left)} unit${left === 1 ? '' : 's'} left`;
   }
 
-  const ready = $('#ready-queue');
-  ready.textContent = '';
   const waiting = r.processes.filter((p) =>
     p.arrival <= t && exec[p.id] < p.burst && !(cur && !cur.idle && cur.id === p.id));
-  if (!waiting.length) {
-    ready.append(el('span', 'chips-empty', atEnd ? '—' : 'nobody waiting'));
-  } else {
-    waiting.forEach((p) => {
-      const c = el('span', 'chip');
-      c.append(el('span', null, p.id));
-      c.append(el('span', 'chip-rem', ` ${num(p.burst - exec[p.id])} left`));
-      ready.append(c);
-    });
-  }
+  renderChips($('#ready-queue'), waiting.map((p) => ({
+    cls: 'chip',
+    id: p.id,
+    rem: ` ${num(p.burst - exec[p.id])} left`
+  })), atEnd ? '—' : 'nobody waiting');
 
-  const done = $('#done-list');
-  done.textContent = '';
   const finished = r.processes.filter((p) => exec[p.id] >= p.burst);
-  if (!finished.length) {
-    done.append(el('span', 'chips-empty', 'none yet'));
-  } else {
-    finished.forEach((p) => {
-      const c = el('span', 'chip done');
-      c.textContent = `${p.id} @ ${p.completion}`;
-      done.append(c);
-    });
-  }
+  renderChips($('#done-list'), finished.map((p) => ({
+    cls: 'chip done',
+    id: `${p.id} @ ${p.completion}`
+  })), 'none yet');
 
   $$('#proc-table tbody tr').forEach((tr) => {
     const pid = tr.dataset.pid;
@@ -596,6 +593,31 @@ function paintLive(t, cur) {
     tr.classList.toggle('row-running',
       Boolean(cur) && !cur.idle && cur.id === pid && !atEnd);
     tr.classList.toggle('row-done', Boolean(p) && exec[pid] >= p.burst);
+  });
+}
+
+/* Chips are rebuilt only when the set they show actually changes.
+ *
+ * paintLive runs once per animation frame, and a chip's entrance animation
+ * restarts whenever its element is replaced -- so rebuilding every frame
+ * would leave every chip frozen on the first keyframe. Comparing a
+ * signature first means a chip animates in exactly once, when the process
+ * it stands for really does enter the queue or finish. */
+function renderChips(host, items, emptyText) {
+  const sig = items.map((c) => `${c.cls}|${c.id}|${c.rem || ''}`).join('\u0001');
+  if (host.dataset.sig === sig) return;
+  host.dataset.sig = sig;
+
+  host.textContent = '';
+  if (!items.length) {
+    host.append(el('span', 'chips-empty', emptyText));
+    return;
+  }
+  items.forEach((c, i) => {
+    const node = stagger(el('span', c.cls), i);
+    node.append(el('span', null, c.id));
+    if (c.rem) node.append(el('span', 'chip-rem', c.rem));
+    host.append(node);
   });
 }
 
@@ -639,6 +661,7 @@ function startPlayback() {
   if (state.clock >= state.result.window.end) state.clock = state.result.window.start;
   state.playing = true;
   state.lastFrame = 0;
+  document.body.classList.add('is-playing');
   $('#play-icon').textContent = '⏸';
   $('#play-text').textContent = 'Pause';
   $('#play').setAttribute('aria-label', 'Pause');
@@ -649,6 +672,7 @@ function stopPlayback() {
   state.playing = false;
   if (state.rafId) cancelAnimationFrame(state.rafId);
   state.rafId = 0;
+  document.body.classList.remove('is-playing');
   $('#play-icon').textContent = '▶';
   $('#play-text').textContent = 'Play';
   $('#play').setAttribute('aria-label', 'Play');
@@ -734,10 +758,12 @@ function renderComparison(data) {
   const end = Math.max(...ok.map((r) => r.window.end), 1);
   const start = Math.min(...ok.map((r) => r.window.start), 0);
   const span = Math.max(1, end - start);
+  /* every strip shares one scale, so one grid spacing serves them all */
+  charts.style.setProperty('--unit', `${100 / span}%`);
 
-  data.results.forEach((r) => {
+  data.results.forEach((r, i) => {
     if (r.error) return;
-    const row = el('div', 'cmp-row');
+    const row = stagger(el('div', 'cmp-row'), i);
     const label = r.algorithm.needsQuantum
       ? `${r.algorithm.key} q=${r.algorithm.quantum}`
       : r.algorithm.key;

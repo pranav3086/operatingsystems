@@ -833,6 +833,23 @@ green, so the page never puts red and green side by side.
 Idle is a neutral tone with a 45° hatch so it reads as "nothing ran" in print,
 in forced-colors mode and for colour-blind readers.
 
+**Motion is decoration over a page that is already correct.** Every keyframe
+in the dashboard animates only `opacity`, `transform`, `clip-path` or a
+background position, so nothing it does triggers layout and nothing ends up
+anywhere the layout did not already put it. Nothing is made visible *by* an
+animation either: entrance staggers use a `backwards` fill rather than an
+`opacity: 0` base rule, which is what lets one `prefers-reduced-motion` block
+switch the whole thing off and still leave the finished page intact. The two
+loops that run continuously are tied to real state -- a highlight travels
+along whichever bar currently holds the CPU, and the playhead only pulses
+while the clock is actually running -- so motion on screen always means
+something is happening.
+
+The live panel rebuilds its chips only when the set they show changes, not on
+every animation frame: a chip's entrance animation restarts whenever its
+element is replaced, so rebuilding at 60 Hz would freeze every chip on its
+first keyframe.
+
 **Presentation is isolated.** Every escape sequence and every non-ASCII glyph
 goes through `ui.c`, which picks a Unicode or ASCII glyph table and turns
 colors on only when stdout is a terminal, `NO_COLOR` is unset, and (on

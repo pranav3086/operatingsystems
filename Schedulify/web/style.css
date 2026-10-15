@@ -34,6 +34,14 @@
  *       the red fills they sit between;
  *     - "finished" is a neutral chip with a check glyph rather than green,
  *       so the page never puts red and green side by side.
+ *
+ * MOTION
+ *   All of it lives in one section near the bottom of this file, and all of
+ *   it is optional: see the comment there. The short version is that no
+ *   element depends on an animation to become visible, so the single
+ *   prefers-reduced-motion block switches the lot off without breaking the
+ *   page. Durations and easings come from four tokens, so everything that
+ *   moves moves with the same hand.
  */
 
 :root {
@@ -65,13 +73,34 @@
 
   --critical:        #a32620;
 
-  --radius:          10px;
-  --radius-sm:       6px;
-  --bar-radius:      4px;       /* 4px rounded data-ends */
+  --radius:          13px;
+  --radius-sm:       8px;
+  --bar-radius:      5px;       /* rounded data-ends */
   --gap:             2px;       /* surface gap between fills */
   --topbar-h:        80px;
 
-  --shadow: 0 1px 2px rgba(20, 17, 14, .05), 0 10px 28px rgba(20, 17, 14, .06);
+  /* Elevation is three stacked shadows rather than one: a hairline contact
+   * shadow, a short mid shadow and a wide soft one. A single large blur
+   * reads as fog; stacking them reads as paper lying on paper. */
+  --shadow:
+    0 1px 1px rgba(20, 17, 14, .04),
+    0 2px 5px rgba(20, 17, 14, .035),
+    0 10px 24px rgba(20, 17, 14, .05);
+  --shadow-lift:
+    0 1px 1px rgba(20, 17, 14, .05),
+    0 6px 14px rgba(20, 17, 14, .07),
+    0 20px 44px rgba(20, 17, 14, .09);
+  --edge-top: inset 0 1px 0 rgba(255, 255, 255, .72);
+
+  /* MOTION
+   *   One pair of easings and three durations, so everything that moves
+   *   moves with the same hand: --ease-out for things arriving on screen,
+   *   --ease-soft for state that changes under the cursor. */
+  --ease-out:  cubic-bezier(.22, .68, .32, 1);
+  --ease-soft: cubic-bezier(.4, 0, .2, 1);
+  --dur-fast:  .14s;
+  --dur-mid:   .28s;
+  --dur-slow:  .55s;
 
   --font: "Times New Roman", Times, "Liberation Serif", "Nimbus Roman",
           Georgia, serif;
@@ -104,7 +133,15 @@
     --idle-ink:       #8a8075;
 
     --critical:       #e0655b;
-    --shadow: 0 1px 2px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.5);
+    --shadow:
+      0 1px 1px rgba(0, 0, 0, .5),
+      0 2px 5px rgba(0, 0, 0, .4),
+      0 10px 26px rgba(0, 0, 0, .45);
+    --shadow-lift:
+      0 1px 2px rgba(0, 0, 0, .55),
+      0 8px 18px rgba(0, 0, 0, .5),
+      0 24px 50px rgba(0, 0, 0, .5);
+    --edge-top: inset 0 1px 0 rgba(247, 243, 236, .07);
   }
 }
 
@@ -133,7 +170,15 @@
   --idle-ink:       #8a8075;
 
   --critical:       #e0655b;
-  --shadow: 0 1px 2px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.5);
+  --shadow:
+    0 1px 1px rgba(0, 0, 0, .5),
+    0 2px 5px rgba(0, 0, 0, .4),
+    0 10px 26px rgba(0, 0, 0, .45);
+  --shadow-lift:
+    0 1px 2px rgba(0, 0, 0, .55),
+    0 8px 18px rgba(0, 0, 0, .5),
+    0 24px 50px rgba(0, 0, 0, .5);
+  --edge-top: inset 0 1px 0 rgba(247, 243, 236, .07);
 }
 
 * { box-sizing: border-box; }
@@ -141,7 +186,18 @@
 html, body { margin: 0; padding: 0; }
 
 body {
-  background: var(--page);
+  /* Two very faint accent washes keep the large empty areas from reading
+   * as a blank sheet. They are fixed, so they stay put while the page
+   * scrolls and never draw attention to themselves. */
+  background:
+    radial-gradient(1180px 640px at 14% -10%,
+                    color-mix(in oklab, var(--accent) 7%, transparent) 0%,
+                    transparent 60%),
+    radial-gradient(900px 520px at 102% 2%,
+                    color-mix(in oklab, var(--accent) 4%, transparent) 0%,
+                    transparent 55%),
+    var(--page);
+  background-attachment: fixed;
   color: var(--ink);
   font-family: var(--font);
   font-size: 17px;
@@ -170,21 +226,41 @@ code {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; flex-wrap: wrap;
   padding: 16px 22px;
-  background: var(--surface);
+  background: color-mix(in oklab, var(--surface) 93%, transparent);
+  backdrop-filter: saturate(1.4) blur(14px);
+  -webkit-backdrop-filter: saturate(1.4) blur(14px);
   border-bottom: 1px solid var(--hairline);
   position: sticky; top: 0; z-index: 50;
 }
+/* a hairline of accent under the bar, brightest at the brand end */
+.topbar::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 1px; pointer-events: none;
+  background: linear-gradient(90deg,
+    var(--accent) 0%,
+    color-mix(in oklab, var(--accent) 30%, transparent) 26%,
+    transparent 62%);
+  opacity: .55;
+}
 .brand { display: flex; align-items: center; gap: 13px; }
-.brand h1 { font-size: 24px; letter-spacing: .01em; }
+.brand h1 { font-size: 25px; letter-spacing: .01em; }
 .brand-sub { margin: 0; font-size: 13.5px; color: var(--ink-muted);
              font-style: italic; }
 .brand-mark {
-  width: 32px; height: 32px; border-radius: 7px; flex: none;
+  position: relative; overflow: hidden;
+  width: 34px; height: 34px; border-radius: 9px; flex: none;
   background:
     linear-gradient(90deg, var(--proc) 0 42%, transparent 42% 50%,
                     var(--proc-run) 50% 78%, transparent 78% 86%,
-                    var(--proc) 86% 100%);
-  box-shadow: inset 0 0 0 1px var(--hairline);
+                    var(--proc) 86% 100%),
+    var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow);
+}
+/* a playhead sweeping the mark, so the logo is itself a running schedule */
+.brand-mark::after {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--ink); opacity: .55;
+  animation: mark-sweep 3.6s var(--ease-soft) infinite;
 }
 .topbar-actions { display: flex; align-items: center; gap: 12px; }
 .engine-note {
@@ -210,11 +286,13 @@ code {
 }
 
 .panel {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
-  padding: 17px;
-  box-shadow: var(--shadow);
+  padding: 18px;
+  box-shadow: var(--shadow), var(--edge-top);
+  transition: box-shadow var(--dur-mid) var(--ease-soft);
 }
 
 /* The settings panel scrolls on its own, independently of the dashboard:
@@ -264,9 +342,19 @@ code {
 .block { display: grid; gap: 10px; }
 .block-head { display: flex; align-items: center; justify-content: space-between; }
 .block-title {
-  font-size: 14px; text-transform: uppercase;
-  letter-spacing: .09em; color: var(--ink-2); font-weight: 700;
+  font-size: 13.5px; text-transform: uppercase;
+  letter-spacing: .11em; color: var(--ink-2); font-weight: 700;
+  display: flex; align-items: center; gap: 11px;
 }
+/* The rule fills whatever is left of the line, which is what makes a
+ * stack of headings look set rather than typed. */
+.block-title::after {
+  content: ""; flex: 1 1 auto; min-width: 16px; height: 1px;
+  background: linear-gradient(90deg, var(--baseline), transparent 92%);
+  opacity: .8;
+}
+/* inside .block-head the rule runs out to the count pill instead */
+.block-head .block-title { flex: 1 1 auto; }
 .hint-inline { text-transform: none; letter-spacing: 0;
                font-weight: 400; font-style: italic;
                color: var(--ink-muted); }
@@ -284,8 +372,14 @@ code {
   color: var(--ink-2);
 }
 .micro-title {
-  font-size: 12.5px; text-transform: uppercase; letter-spacing: .1em;
-  color: var(--ink-muted); margin: 0 0 7px; font-weight: 700;
+  font-size: 12.5px; text-transform: uppercase; letter-spacing: .12em;
+  color: var(--ink-muted); margin: 0 0 8px; font-weight: 700;
+  display: flex; align-items: baseline; gap: 0;
+}
+.micro-title::after {
+  content: ""; flex: 1 1 auto; min-width: 12px; height: 1px;
+  margin-left: 10px; align-self: center;
+  background: linear-gradient(90deg, var(--grid), transparent 92%);
 }
 .micro-title.spaced { margin-top: 22px; }
 
@@ -293,19 +387,33 @@ code {
 
 .algo-list { display: grid; gap: 6px; }
 .algo {
+  position: relative; overflow: hidden;
   display: grid; grid-template-columns: auto 1fr; gap: 11px;
   align-items: baseline;
-  padding: 9px 12px; border: 1px solid var(--hairline);
+  padding: 9px 12px 9px 15px; border: 1px solid var(--hairline);
   border-radius: var(--radius-sm); background: var(--surface);
   cursor: pointer; text-align: left; font: inherit; color: inherit;
-  transition: background .12s, border-color .12s;
+  transition: background var(--dur-fast) var(--ease-soft),
+              border-color var(--dur-fast) var(--ease-soft),
+              transform var(--dur-fast) var(--ease-soft),
+              box-shadow var(--dur-fast) var(--ease-soft);
 }
-.algo:hover { background: var(--surface-sunken); }
+/* The selected row is marked by a bar that grows out from the centre, so
+ * moving the choice reads as one movement rather than two repaints. */
+.algo::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent); border-radius: 0 2px 2px 0;
+  transform: scaleY(0); transform-origin: center;
+  transition: transform var(--dur-mid) var(--ease-out);
+}
+.algo:hover { background: var(--surface-sunken); transform: translateX(2px); }
 .algo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .algo[aria-checked="true"] {
-  border-color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--hairline));
   background: var(--accent-wash);
+  box-shadow: 0 1px 10px -4px var(--accent);
 }
+.algo[aria-checked="true"]::before { transform: scaleY(1); }
 .algo-key {
   font-size: 12px; font-weight: 700; letter-spacing: .05em;
   color: var(--accent);
@@ -322,6 +430,16 @@ input[type="number"], input[type="text"], select {
   color: var(--ink); background: var(--surface);
   border: 1px solid var(--baseline); border-radius: var(--radius-sm);
   padding: 6px 9px; width: 100%;
+  transition: border-color var(--dur-fast) var(--ease-soft),
+              box-shadow var(--dur-fast) var(--ease-soft),
+              background var(--dur-fast) var(--ease-soft);
+}
+input[type="number"]:hover, input[type="text"]:hover, select:hover {
+  border-color: var(--ink-muted);
+}
+input[type="number"]:focus, input[type="text"]:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
 }
 input[type="number"] { font-variant-numeric: tabular-nums; }
 input:focus-visible, select:focus-visible, button:focus-visible {
@@ -352,29 +470,61 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   font-size: 19px; line-height: 1; border-radius: var(--radius-sm);
   padding: 1px 5px; font-family: var(--font);
 }
-.row-del:hover { color: var(--critical); background: var(--surface-sunken); }
+.row-del { transition: color var(--dur-fast) var(--ease-soft),
+                       background var(--dur-fast) var(--ease-soft),
+                       transform var(--dur-fast) var(--ease-soft); }
+.row-del:hover { color: var(--critical); background: var(--surface-sunken);
+                 transform: rotate(90deg); }
 
 .btn {
+  position: relative; overflow: hidden; isolation: isolate;
   font: inherit; font-size: 15.5px; font-weight: 700;
   border-radius: var(--radius-sm); padding: 8px 15px;
   border: 1px solid var(--hairline); cursor: pointer;
   background: var(--surface); color: var(--ink);
-  transition: background .12s, border-color .12s, transform .06s;
+  box-shadow: 0 1px 2px rgba(20, 17, 14, .05);
+  transition: background var(--dur-fast) var(--ease-soft),
+              border-color var(--dur-fast) var(--ease-soft),
+              box-shadow var(--dur-fast) var(--ease-soft),
+              transform var(--dur-fast) var(--ease-soft),
+              color var(--dur-fast) var(--ease-soft);
 }
-.btn:active { transform: translateY(1px); }
+.btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.btn:active { transform: translateY(1px) scale(.99);
+              box-shadow: 0 1px 1px rgba(20, 17, 14, .08); }
 .btn-primary {
-  background: var(--accent); border-color: var(--accent);
+  background: linear-gradient(177deg,
+    color-mix(in oklab, var(--accent) 88%, #fff) 0%, var(--accent) 60%,
+    color-mix(in oklab, var(--accent) 88%, var(--accent-strong)) 100%);
+  border-color: color-mix(in oklab, var(--accent) 70%, var(--accent-strong));
   color: var(--on-accent);
+  box-shadow: 0 1px 2px rgba(20, 17, 14, .12),
+              inset 0 1px 0 rgba(255, 255, 255, .22);
 }
 .btn-primary:hover {
-  background: var(--accent-strong); border-color: var(--accent-strong);
+  background: linear-gradient(177deg, var(--accent) 0%,
+              var(--accent-strong) 100%);
+  border-color: var(--accent-strong);
+  box-shadow: 0 2px 4px rgba(20, 17, 14, .12),
+              0 10px 22px -8px var(--accent),
+              inset 0 1px 0 rgba(255, 255, 255, .22);
 }
+/* a light sweeping across the primary button on hover */
+.btn-primary::after {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(112deg, transparent 32%,
+              rgba(255, 255, 255, .3) 48%, transparent 64%);
+  transform: translateX(-135%);
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+.btn-primary:hover::after { transform: translateX(135%); }
 .btn-soft { background: var(--surface-sunken); }
 .btn-soft:hover { background: var(--grid); }
-.btn-ghost { background: none; color: var(--ink-2); }
-.btn-ghost:hover { background: var(--surface-sunken); }
+.btn-ghost { background: none; color: var(--ink-2); box-shadow: none; }
+.btn-ghost:hover { background: var(--surface-sunken); color: var(--ink); }
 .btn-icon { display: inline-flex; align-items: center; gap: 7px; }
-.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.btn[disabled] { opacity: .5; cursor: not-allowed; transform: none;
+                 box-shadow: none; }
 
 .btn-row { display: flex; gap: 8px; }
 .btn-row .btn { flex: 1; }
@@ -388,10 +538,46 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 /* ───────────────────────────── empty state ───────────────────────── */
 
-.empty-state h2 { font-size: 21px; margin-bottom: 9px; }
+.empty-state { overflow: hidden; }
+.empty-state h2 { font-size: 22px; margin-bottom: 10px; }
 .empty-state p { margin: 0 0 9px; color: var(--ink-2); font-size: 16px;
                  max-width: 64ch; }
 .empty-state em { color: var(--accent); font-style: normal; font-weight: 700; }
+
+/* A decorative schedule under the empty-state copy: it is not a real
+ * timeline and is hidden from assistive technology. It exists so the
+ * first thing on screen shows what the page is about -- bars on a clock
+ * -- before any workload has been run. */
+.ghost-timeline {
+  position: relative; height: 42px; margin-top: 18px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  box-shadow: inset 0 1px 3px rgba(20, 17, 14, .06);
+  overflow: hidden;
+}
+.ghost-row { position: absolute; inset: 0; }
+.ghost-row i {
+  position: absolute; top: 5px; bottom: 5px;
+  border-radius: var(--bar-radius);
+  box-shadow: 0 0 0 var(--gap) var(--surface-sunken);
+}
+.ghost-row i:nth-child(1) { left: 0%;  width: 16%; }
+.ghost-row i:nth-child(2) { left: 17%; width: 12%; }
+.ghost-row i:nth-child(3) { left: 30%; width: 7%;  }
+.ghost-row i:nth-child(4) { left: 38%; width: 14%; }
+.ghost-row i:nth-child(5) { left: 53%; width: 21%; }
+.ghost-row i:nth-child(6) { left: 75%; width: 25%; }
+.ghost-pending i { background: var(--proc-soft); opacity: .5; }
+.ghost-filled  i { background: var(--proc); }
+.ghost-filled {
+  clip-path: inset(0 100% 0 0);
+  animation: ghost-wipe 6.5s linear infinite;
+}
+.ghost-timeline b {
+  position: absolute; top: -2px; bottom: -2px; width: 2px;
+  background: var(--ink); opacity: .4; left: 0;
+  animation: ghost-sweep 6.5s linear infinite;
+}
 
 /* ───────────────────────────── playback ──────────────────────────── */
 
@@ -406,8 +592,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
                 min-width: 32px; }
 .clock { margin-left: auto; display: flex; align-items: baseline; gap: 6px; }
 .clock-label { font-size: 13.5px; color: var(--ink-muted); font-style: italic; }
-.clock-value { font-size: 28px; font-weight: 700;
-               font-variant-numeric: tabular-nums; color: var(--accent); }
+.clock-value { font-size: 30px; font-weight: 700; line-height: 1;
+               font-variant-numeric: tabular-nums; color: var(--accent);
+               text-shadow: 0 0 22px var(--accent-wash); }
 .clock-total { font-size: 13.5px; color: var(--ink-muted);
                font-variant-numeric: tabular-nums; }
 .scrub { width: 100%; }
@@ -421,21 +608,38 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 @media (max-width: 760px) { .live { grid-template-columns: 1fr; } }
 
 .cpu-now {
+  position: relative; overflow: hidden;
   font-size: 19px; font-weight: 700;
   padding: 11px 13px; border-radius: var(--radius-sm);
   background: var(--surface-sunken); border: 1px solid var(--hairline);
   border-left: 3px solid var(--proc-run);
   font-variant-numeric: tabular-nums;
+  transition: border-left-color var(--dur-mid) var(--ease-soft),
+              color var(--dur-mid) var(--ease-soft);
+}
+/* A slow wash across the box while a process holds the CPU. It carries no
+ * information the text does not already state; it is there so the eye can
+ * tell at a glance that the clock is moving. */
+.cpu-now::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 38%,
+              var(--accent-wash) 50%, transparent 62%);
+  background-size: 280% 100%;
+  animation: wash 2.6s linear infinite;
 }
 .cpu-now.idle { border-left-color: var(--idle-ink); color: var(--ink-muted);
                 font-weight: 400; font-size: 16px; font-style: italic; }
+.cpu-now.idle::after { display: none; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 32px;
          align-content: flex-start; }
 .chip {
   font-size: 13.5px; font-variant-numeric: tabular-nums;
-  padding: 3px 10px; border-radius: 999px;
+  padding: 3px 11px; border-radius: 999px;
   border: 1px solid var(--hairline); background: var(--surface-sunken);
   color: var(--ink-2);
+  box-shadow: var(--edge-top);
+  animation: pop var(--dur-mid) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 10) * 30ms);
 }
 /* finished is neutral plus a check glyph, never green: with a red accent
  * the page must not put red and green beside each other. */
@@ -472,11 +676,22 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .gantt-wrap { position: relative; }
 
 .gantt {
-  position: relative; height: 64px;
+  position: relative; height: 70px;
   background: var(--surface-sunken);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 3px rgba(20, 17, 14, .07);
   overflow: hidden;
+}
+/* One rule per unit of time. The bars cover the chart edge to edge, so the
+ * grid is drawn OVER them -- faint enough to read a width against and not
+ * enough to compete with the segment labels. --unit is set by app.js from
+ * the window the C engine reports. */
+.gantt::after {
+  content: ""; position: absolute; inset: 0; z-index: 3;
+  pointer-events: none; opacity: .17;
+  background: repeating-linear-gradient(90deg,
+    var(--ink) 0 1px, transparent 1px var(--unit, 100%));
 }
 
 /* one cell per timeline segment, positioned by time */
@@ -489,16 +704,36 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 }
 .seg-fill {
   position: absolute; inset: 0 auto 0 0;
-  background: var(--proc);
+  overflow: hidden;
+  background: linear-gradient(177deg,
+    color-mix(in oklab, var(--proc) 86%, var(--surface)) 0%,
+    var(--proc) 46%,
+    color-mix(in oklab, var(--proc) 88%, var(--ink)) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18);
   border-radius: var(--bar-radius);
   width: 0;
 }
-.seg.running .seg-fill { background: var(--proc-run); }
+.seg.running .seg-fill {
+  background: linear-gradient(177deg,
+    color-mix(in oklab, var(--proc-run) 84%, var(--surface)) 0%,
+    var(--proc-run) 46%,
+    color-mix(in oklab, var(--proc-run) 88%, var(--ink)) 100%);
+}
+/* A highlight travelling along whichever bar currently owns the CPU. */
+.seg.running .seg-fill::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(104deg, transparent 36%,
+              color-mix(in oklab, var(--surface) 42%, transparent) 50%,
+              transparent 64%);
+  background-size: 300% 100%;
+  animation: wash 1.5s linear infinite;
+}
 .seg-track {
   position: absolute; inset: 0;
   background: var(--proc-soft);
   border-radius: var(--bar-radius);
   opacity: .45;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--proc) 22%, transparent);
 }
 .seg-label {
   position: absolute; inset: 0;
@@ -506,8 +741,12 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   font-size: 14.5px; font-weight: 700; letter-spacing: .02em;
   color: var(--ink);
   z-index: 2; pointer-events: none;
-  text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface),
-               0 0 2px var(--surface);
+  text-shadow:
+     1px 0 0 var(--surface), -1px 0 0 var(--surface),
+     0 1px 0 var(--surface),  0 -1px 0 var(--surface),
+     1px 1px 0 var(--surface), -1px -1px 0 var(--surface),
+     1px -1px 0 var(--surface), -1px 1px 0 var(--surface),
+     0 0 4px var(--surface);
 }
 .seg.idle { box-shadow: 0 0 0 var(--gap) var(--surface-sunken); }
 .seg.idle .seg-track {
@@ -523,11 +762,22 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .playhead {
   position: absolute; top: -4px; bottom: -4px; width: 2px;
   background: var(--ink); z-index: 5; pointer-events: none;
+  box-shadow: 0 0 10px 1px color-mix(in oklab, var(--ink) 40%, transparent);
   transition: left .04s linear;
 }
 .playhead::after {
   content: ""; position: absolute; top: -3px; left: -3px;
   width: 8px; height: 8px; border-radius: 50%; background: var(--ink);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ink) 14%, transparent);
+}
+/* a ring leaving the head, only while the clock is actually running */
+.playhead::before {
+  content: ""; position: absolute; top: -5px; left: -5px;
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 1.5px solid var(--ink); opacity: 0;
+}
+body.is-playing .playhead::before {
+  animation: ping 1.4s var(--ease-out) infinite;
 }
 
 .ruler { position: relative; height: 27px; margin-top: 5px; }
@@ -542,14 +792,17 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 /* Preemption markers are ink, not red: a red marker would vanish into the
  * red fills it sits between. */
 .marker {
-  position: absolute; top: 0; width: 0; height: 0; z-index: 4;
-  pointer-events: none;
+  position: absolute; top: 0; bottom: 0; width: 1px; z-index: 4;
+  margin-left: -.5px; pointer-events: none;
+  background: repeating-linear-gradient(180deg,
+    color-mix(in oklab, var(--ink) 52%, transparent) 0 3px,
+    transparent 3px 6px);
 }
 .marker::after {
-  content: ""; position: absolute; left: -4px; top: -7px;
+  content: ""; position: absolute; left: -4px; top: 0;
   width: 0; height: 0;
   border-left: 4px solid transparent; border-right: 4px solid transparent;
-  border-top: 6px solid var(--ink);
+  border-top: 7px solid var(--ink);
 }
 
 /* per-process swimlanes */
@@ -564,16 +817,28 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .lane-name .lane-meta { font-weight: 400; color: var(--ink-muted);
                         font-size: 12px; font-style: italic; }
 .lane-track {
-  position: relative; height: 25px;
-  background: var(--surface-sunken);
+  position: relative; height: 26px;
+  background:
+    repeating-linear-gradient(90deg,
+      var(--grid) 0 1px, transparent 1px var(--unit, 100%)),
+    var(--surface-sunken);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 2px rgba(20, 17, 14, .06);
+  transition: border-color var(--dur-mid) var(--ease-soft),
+              box-shadow var(--dur-mid) var(--ease-soft);
 }
-.lane-track.is-running { border-color: var(--proc-run); }
+.lane-track.is-running {
+  border-color: var(--proc-run);
+  box-shadow: inset 0 1px 2px rgba(20, 17, 14, .06),
+              0 0 0 3px var(--accent-wash);
+}
 .lane-seg {
   position: absolute; top: 3px; bottom: 3px;
   background: var(--proc); border-radius: var(--bar-radius);
-  box-shadow: 0 0 0 var(--gap) var(--surface-sunken);
+  box-shadow: 0 0 0 var(--gap) var(--surface-sunken),
+              inset 0 1px 0 rgba(255, 255, 255, .16);
+  transition: background var(--dur-mid) var(--ease-soft);
 }
 .lane-seg.running { background: var(--proc-run); }
 .lane-seg.pending { background: var(--proc-soft); }
@@ -595,9 +860,33 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
 }
 .tile {
-  background: var(--surface-sunken); border: 1px solid var(--hairline);
-  border-radius: var(--radius-sm); padding: 12px 13px;
+  position: relative; overflow: hidden;
+  background: linear-gradient(177deg,
+    color-mix(in oklab, var(--surface) 55%, var(--surface-sunken)) 0%,
+    var(--surface-sunken) 100%);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm); padding: 13px 14px;
+  box-shadow: var(--edge-top);
+  transition: transform var(--dur-mid) var(--ease-out),
+              box-shadow var(--dur-mid) var(--ease-soft),
+              border-color var(--dur-mid) var(--ease-soft);
+  animation: rise var(--dur-slow) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 12) * 45ms);
 }
+/* the accent rule only appears on the tile under the cursor, so a row of
+ * tiles stays quiet until one is being read */
+.tile::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+  transform: scaleX(0); transform-origin: left;
+  transition: transform var(--dur-mid) var(--ease-out);
+}
+.tile:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lift), var(--edge-top);
+  border-color: color-mix(in oklab, var(--accent) 30%, var(--hairline));
+}
+.tile:hover::before { transform: scaleX(1); }
 /* Two lines are reserved so a label that wraps ("Context switches") does
  * not push its value below the others' baseline. */
 .tile-label { font-size: 12.5px; color: var(--ink-muted);
@@ -628,13 +917,19 @@ table.data thead th {
   color: var(--ink-muted); font-weight: 700;
   border-bottom: 1px solid var(--baseline);
 }
+table.data tbody tr { transition: background var(--dur-fast) var(--ease-soft); }
 table.data tbody tr:hover { background: var(--surface-sunken); }
+table.data tbody tr {
+  animation: fade-up var(--dur-mid) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 14) * 34ms);
+}
 table.data tfoot td { font-weight: 700; border-top: 1px solid var(--baseline);
                       border-bottom: 0; }
 td.best { color: var(--ink); font-weight: 700; }
 /* the winner mark is ink, not a hue -- it sits beside red numbers */
 .star { color: var(--ink-2); margin-left: 4px; }
 tr.row-running td { background: var(--accent-wash); }
+tr.row-running td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 tr.row-done td:first-child::after {
   content: "\2713"; color: var(--ink-muted); margin-left: 7px;
   font-weight: 700;
@@ -643,11 +938,28 @@ tr.row-done td:first-child::after {
 /* ───────────────────────────── trace ────────────────────────────── */
 
 .trace { list-style: none; margin: 0; padding: 0; max-height: 290px;
-         overflow-y: auto; display: grid; gap: 4px; }
+         overflow-y: auto; display: grid; gap: 4px;
+         --fade: linear-gradient(180deg, transparent 0, #000 14px,
+                 #000 calc(100% - 14px), transparent 100%);
+         -webkit-mask-image: var(--fade); mask-image: var(--fade); }
 .trace li {
+  position: relative;
   display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 11px;
-  font-size: 15px; padding: 7px 10px; border-radius: var(--radius-sm);
+  font-size: 15px; padding: 7px 10px 7px 13px; border-radius: var(--radius-sm);
   border: 1px solid transparent; color: var(--ink-muted);
+  transition: color var(--dur-mid) var(--ease-soft),
+              background var(--dur-mid) var(--ease-soft),
+              border-color var(--dur-mid) var(--ease-soft);
+  animation: fade-up var(--dur-mid) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 16) * 26ms);
+}
+/* the marker grows as the clock reaches the decision, which is what makes
+ * the replay look like a cursor moving down the log */
+.trace li::before {
+  content: ""; position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px;
+  border-radius: 0 2px 2px 0; background: var(--accent);
+  transform: scaleY(0); transform-origin: center;
+  transition: transform var(--dur-mid) var(--ease-out);
 }
 .trace li .t { font-variant-numeric: tabular-nums; font-weight: 700;
                color: var(--ink-muted); }
@@ -655,8 +967,10 @@ tr.row-done td:first-child::after {
 .trace li.seen .t { color: var(--accent); }
 .trace li.current {
   background: var(--accent-wash);
-  border-color: var(--accent); color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  color: var(--ink);
 }
+.trace li.current::before { transform: scaleY(1); }
 .trace li.current .t { color: var(--accent-strong); }
 
 /* ───────────────────────────── comparison ───────────────────────── */
@@ -666,21 +980,39 @@ tr.row-done td:first-child::after {
            gap: 11px; align-items: center; }
 .cmp-label { font-size: 14.5px; font-weight: 700; color: var(--ink-2);
              text-align: right; font-variant-numeric: tabular-nums; }
+.cmp-row {
+  animation: slide-in var(--dur-slow) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 8) * 55ms);
+}
 .cmp-strip {
-  position: relative; height: 27px; background: var(--surface-sunken);
+  position: relative; height: 28px;
+  background:
+    repeating-linear-gradient(90deg,
+      var(--grid) 0 1px, transparent 1px var(--unit, 100%)),
+    var(--surface-sunken);
   border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 2px rgba(20, 17, 14, .06);
   overflow: hidden;
 }
 .cmp-seg { position: absolute; top: 2px; bottom: 2px;
-           background: var(--proc); border-radius: 3px;
-           box-shadow: 0 0 0 var(--gap) var(--surface-sunken); }
+           background: linear-gradient(177deg,
+             color-mix(in oklab, var(--proc) 86%, var(--surface)) 0%,
+             var(--proc) 46%,
+             color-mix(in oklab, var(--proc) 88%, var(--ink)) 100%);
+           border-radius: 3px;
+           box-shadow: 0 0 0 var(--gap) var(--surface-sunken),
+                       inset 0 1px 0 rgba(255, 255, 255, .16); }
 .cmp-seg.idle { background: var(--idle);
                 background-image: repeating-linear-gradient(45deg,
                   var(--idle-ink) 0 1px, transparent 1px 5px); }
 .cmp-seg span { position: absolute; inset: 0; display: flex;
                 align-items: center; justify-content: center;
                 font-size: 12.5px; font-weight: 700; color: var(--ink);
-                text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface); }
+                text-shadow:
+                   1px 0 0 var(--surface), -1px 0 0 var(--surface),
+                   0 1px 0 var(--surface),  0 -1px 0 var(--surface),
+                   1px 1px 0 var(--surface), -1px -1px 0 var(--surface),
+                   1px -1px 0 var(--surface), -1px 1px 0 var(--surface); }
 
 /* ───────────────────────────── tooltip ─────────────────────────── */
 
@@ -688,9 +1020,10 @@ tr.row-done td:first-child::after {
   position: fixed; z-index: 100; pointer-events: none;
   background: var(--ink); color: var(--surface);
   font-size: 14px; line-height: 1.45;
-  padding: 8px 11px; border-radius: var(--radius-sm);
-  box-shadow: 0 4px 18px rgba(0,0,0,.3);
+  padding: 9px 12px; border-radius: var(--radius-sm);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .34);
   max-width: 290px;
+  animation: tip-in .16s var(--ease-out);
 }
 .tooltip b { color: var(--surface); }
 
@@ -701,10 +1034,156 @@ tr.row-done td:first-child::after {
             max-width: 82ch; margin-inline: auto; font-style: italic; }
 .footer code { font-style: normal; }
 
+
+/* ═════════════════════════════ motion ═════════════════════════════
+ *
+ * Every keyframe below animates only opacity, transform, clip-path or a
+ * background position, so nothing here triggers layout and nothing moves
+ * an element away from where the layout put it.
+ *
+ * Nothing is made visible BY an animation: each element's resting state
+ * is already its final state, and the staggered entrances use a
+ * `backwards` fill rather than an `opacity: 0` base rule. That is what
+ * lets the prefers-reduced-motion block below switch the whole section
+ * off with one declaration and still leave a correct page.
+ *
+ * Stagger delays are clamped with min() so a long workload -- forty
+ * segments, twenty trace lines -- still finishes arriving in well under
+ * a second instead of trickling in.
+ */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px) scale(.99); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fade-down {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-18px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes pop {
+  0%   { opacity: 0; transform: scale(.82); }
+  62%  { opacity: 1; transform: scale(1.05); }
+  100% { opacity: 1; transform: scale(1); }
+}
+/* a bar drawing itself in from its own start time */
+@keyframes draw-in {
+  from { opacity: .3; clip-path: inset(0 100% 0 0); }
+  to   { opacity: 1;  clip-path: inset(0 0 0 0); }
+}
+/* a highlight travelling left to right across a box */
+@keyframes wash {
+  from { background-position: 125% 0; }
+  to   { background-position: -25% 0; }
+}
+@keyframes ping {
+  from { opacity: .45; transform: scale(.45); }
+  to   { opacity: 0;   transform: scale(2.4); }
+}
+@keyframes tip-in {
+  from { opacity: 0; transform: translateY(4px) scale(.97); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes mark-sweep {
+  0%        { left: -2px; opacity: 0; }
+  12%, 88%  { opacity: .55; }
+  100%      { left: 34px; opacity: 0; }
+}
+@keyframes ghost-wipe {
+  0%        { clip-path: inset(0 100% 0 0); }
+  86%, 100% { clip-path: inset(0 0 0 0); }
+}
+@keyframes ghost-sweep {
+  0%        { left: 0;    opacity: 0; }
+  6%        { opacity: .4; }
+  86%, 100% { left: 100%; opacity: .4; }
+}
+
+/* ── arrival of the page itself ──────────────────────────────────── */
+
+.topbar     { animation: fade-down var(--dur-mid) var(--ease-out) backwards; }
+.controls   { animation: rise var(--dur-slow) var(--ease-out) 60ms backwards; }
+.empty-state{ animation: rise var(--dur-slow) var(--ease-out) 120ms backwards; }
+.footer     { animation: fade-up var(--dur-slow) var(--ease-out) 260ms backwards; }
+
+/* the settings blocks come in one after the other, top to bottom */
+.controls > * {
+  animation: fade-up var(--dur-mid) var(--ease-out) backwards;
+}
+.controls > :nth-child(1) { animation-delay: 140ms; }
+.controls > :nth-child(2) { animation-delay: 185ms; }
+.controls > :nth-child(3) { animation-delay: 230ms; }
+.controls > :nth-child(4) { animation-delay: 275ms; }
+.controls > :nth-child(5) { animation-delay: 320ms; }
+.controls > :nth-child(6) { animation-delay: 365ms; }
+
+.algo { animation: fade-up var(--dur-mid) var(--ease-out) backwards;
+        animation-delay: calc(200ms + min(var(--i, 0), 8) * 40ms); }
+
+/* ── arrival of a result ─────────────────────────────────────────── */
+
+/* The result panels animate when #result-view stops being [hidden]; the
+ * contents below re-animate on every run, because each run rebuilds the
+ * segments, lanes, tiles, rows and trace lines from scratch. */
+#result-view > *, #compare-view {
+  animation: rise var(--dur-slow) var(--ease-out) backwards;
+}
+#result-view > :nth-child(1) { animation-delay: 0ms; }
+#result-view > :nth-child(2) { animation-delay: 60ms; }
+#result-view > :nth-child(3) { animation-delay: 120ms; }
+#result-view > :nth-child(4) { animation-delay: 180ms; }
+#result-view > :nth-child(5) { animation-delay: 240ms; }
+
+/* the Gantt draws itself left to right, one segment after the next */
+.seg {
+  animation: draw-in var(--dur-mid) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 16) * 42ms);
+}
+.marker {
+  animation: pop var(--dur-mid) var(--ease-out) backwards;
+  animation-delay: calc(240ms + min(var(--i, 0), 16) * 42ms);
+}
+.tick {
+  animation: fade-up var(--dur-mid) var(--ease-out) backwards;
+  animation-delay: calc(140ms + min(var(--i, 0), 20) * 22ms);
+}
+.lane {
+  animation: slide-in var(--dur-slow) var(--ease-out) backwards;
+  animation-delay: calc(120ms + min(var(--i, 0), 12) * 55ms);
+}
+
+/* ── micro-interactions ──────────────────────────────────────────── */
+
+.legend-item .sw { transition: transform var(--dur-fast) var(--ease-out); }
+.legend-item:hover .sw { transform: scale(1.18); }
+
+.seg, .lane-seg, .cmp-seg { cursor: default; }
+.seg:hover .seg-track, .lane-seg:hover { filter: brightness(1.06); }
+
+.pill { transition: background var(--dur-fast) var(--ease-soft); }
+
+/* the panel under the cursor lifts just enough to say it is a card */
+.chart:hover, .live:hover, .playback:hover { box-shadow: var(--shadow-lift),
+                                             var(--edge-top); }
+
 /* ───────────────── reduced motion & forced colours ─────────────── */
 
+/* One switch for the whole motion section above. Because no element
+ * depends on an animation to become visible, turning everything off here
+ * leaves the finished page exactly as it would have ended up. */
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @media (forced-colors: active) {

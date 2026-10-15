@@ -99,6 +99,15 @@
         animation below replays.
       </p>
       <p class="hint">Nothing on this page computes a scheduling decision.</p>
+
+      <!-- Decoration, not data: a schedule that fills in on a loop so the
+           first screen shows what the page does. Hidden from assistive
+           technology because it states nothing. -->
+      <div class="ghost-timeline" aria-hidden="true">
+        <div class="ghost-row ghost-pending"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="ghost-row ghost-filled"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <b></b>
+      </div>
     </div>
 
     <div id="result-view" hidden>
