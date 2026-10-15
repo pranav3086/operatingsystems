@@ -10,30 +10,41 @@
  *   Numeric columns keep tabular-nums so figures still line up vertically.
  *
  * COLOUR
- *   Warm paper neutrals with a single red accent, validated rather than
- *   eyeballed.
+ *   Cool paper neutrals, a blue accent, and green reserved for one thing.
+ *   Validated rather than eyeballed.
  *
  *   Process identity is carried by POSITION (one swimlane row per process)
  *   and by a DIRECT LABEL on every segment -- never by hue. In a Gantt
  *   chart any two processes can end up side by side, so a categorical
  *   palette would have to clear the all-pairs colour-blindness gate, and
- *   only three hues do. Instead the chart uses ONE red hue at three
+ *   only three hues do. Instead the chart uses ONE blue hue at three
  *   lightness steps: pending, executed, on the CPU. Lightness survives
  *   every type of colour vision, so the states are always distinguishable
  *   and identity never depends on colour at all.
  *
- *   The ramp passes the ordinal gate in both themes, against these exact
- *   surfaces:
- *     light  #e39a92 -> #c53f30 -> #7a1f17   (light end 2.22:1 on #fffdf9)
- *     dark   #8a2a20 -> #d4524a -> #f6b9b2   (dark end  2.01:1 on #1b1a18)
- *   The gaps are deliberately wider than the 0.06 minimum: at legend-swatch
- *   size a bare-minimum step was hard to tell from its neighbour.
+ *   The ramp passes the ordinal gate against these exact surfaces, with
+ *   relative luminances that step clearly rather than scraping the bar:
+ *     light  #93b8e0 -> #2f6fb5 -> #123a66   (L .459 / .153 / .041;
+ *                                             light end 2.01:1 on #fbfdfd)
+ *     dark   #235682 -> #4f93d8 -> #b9d7f4   (L .086 / .275 / .655;
+ *                                             dark end  2.26:1 on #141b20)
  *
- *   Two deliberate avoidances now that the accent is red:
- *     - preemption markers are INK, not red, or they would disappear into
- *       the red fills they sit between;
- *     - "finished" is a neutral chip with a check glyph rather than green,
- *       so the page never puts red and green side by side.
+ *   WHERE THE GREEN GOES, AND WHY ONLY THERE. Blue and green are the one
+ *   pair this palette has to be careful with, so green is used for exactly
+ *   one meaning -- finished -- and never to encode anything a reader must
+ *   tell apart from a blue chart fill. It appears on the "finished" chips
+ *   and the done mark in the process table, both of which keep their check
+ *   glyph, so the state is still readable with no colour vision at all.
+ *   The chart ramp itself stays single-hue, so process state is carried by
+ *   lightness as before.
+ *
+ *   Two things stay deliberately neutral: preemption markers and the
+ *   comparison table's winner mark are INK, not accent, because both sit
+ *   directly among accent-coloured fills and numbers.
+ *
+ *   Red survives in one place only -- --critical, for invalid input and
+ *   engine errors -- where it is a full-width filled box with its own
+ *   text, never a small mark competing with the green.
  *
  * MOTION
  *   All of it lives in one section near the bottom of this file, and all of
@@ -47,31 +58,35 @@
 :root {
   color-scheme: light;
 
-  /* warm paper */
-  --page:            #f6f2ea;
-  --surface:         #fffdf9;
-  --surface-sunken:  #f1ece3;
-  --ink:             #14110e;
-  --ink-2:           #4f483f;
-  --ink-muted:       #8a8075;
-  --grid:            #e4ddd1;
-  --baseline:        #c9c0b2;
-  --hairline:        rgba(20, 17, 14, 0.12);
+  /* cool paper */
+  --page:            #eef3f4;
+  --surface:         #fbfdfd;
+  --surface-sunken:  #e8eff0;
+  --ink:             #0e1419;
+  --ink-2:           #44505c;
+  --ink-muted:       #78848f;
+  --grid:            #dbe4e7;
+  --baseline:        #c0ccd2;
+  --hairline:        rgba(8, 20, 28, 0.12);
 
   /* the one chart hue, three ordinal steps */
-  --proc-soft:       #e39a92;   /* not yet executed   */
-  --proc:            #c53f30;   /* already executed   */
-  --proc-run:        #7a1f17;   /* on the CPU now     */
+  --proc-soft:       #93b8e0;   /* not yet executed   */
+  --proc:            #2f6fb5;   /* already executed   */
+  --proc-run:        #123a66;   /* on the CPU now     */
 
-  --accent:          #c0392b;   /* buttons, selection, focus */
-  --accent-strong:   #8c2920;
-  --accent-wash:     rgba(192, 57, 43, 0.10);
-  --on-accent:       #fffdf9;
+  --accent:          #1d6fc4;   /* buttons, selection, focus */
+  --accent-strong:   #15528f;
+  --accent-wash:     rgba(29, 111, 196, 0.10);
+  --on-accent:       #fbfdfd;
 
-  --idle:            #e4ddd1;
-  --idle-ink:        #8a8075;
+  /* the one green, and only for "finished" */
+  --ok:              #176e51;
+  --ok-wash:         rgba(23, 110, 81, 0.10);
 
-  --critical:        #a32620;
+  --idle:            #dbe4e7;
+  --idle-ink:        #78848f;
+
+  --critical:        #b3261e;
 
   --radius:          13px;
   --radius-sm:       8px;
@@ -83,13 +98,13 @@
    * shadow, a short mid shadow and a wide soft one. A single large blur
    * reads as fog; stacking them reads as paper lying on paper. */
   --shadow:
-    0 1px 1px rgba(20, 17, 14, .04),
-    0 2px 5px rgba(20, 17, 14, .035),
-    0 10px 24px rgba(20, 17, 14, .05);
+    0 1px 1px rgba(8, 20, 28, .04),
+    0 2px 5px rgba(8, 20, 28, .035),
+    0 10px 24px rgba(8, 20, 28, .05);
   --shadow-lift:
-    0 1px 1px rgba(20, 17, 14, .05),
-    0 6px 14px rgba(20, 17, 14, .07),
-    0 20px 44px rgba(20, 17, 14, .09);
+    0 1px 1px rgba(8, 20, 28, .05),
+    0 6px 14px rgba(8, 20, 28, .07),
+    0 20px 44px rgba(8, 20, 28, .09);
   --edge-top: inset 0 1px 0 rgba(255, 255, 255, .72);
 
   /* MOTION
@@ -110,29 +125,32 @@
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --page:           #0f0e0d;
-    --surface:        #1b1a18;
-    --surface-sunken: #161513;
-    --ink:            #f7f3ec;
-    --ink-2:          #c6bdb0;
-    --ink-muted:      #8a8075;
-    --grid:           #2e2b27;
-    --baseline:       #3b3732;
-    --hairline:       rgba(247, 243, 236, 0.12);
+    --page:           #0b1013;
+    --surface:        #141b20;
+    --surface-sunken: #10171b;
+    --ink:            #eef4f6;
+    --ink-2:          #b2c0c8;
+    --ink-muted:      #7b8a93;
+    --grid:           #242e35;
+    --baseline:       #323e46;
+    --hairline:       rgba(238, 244, 246, 0.12);
 
-    --proc-soft:      #8a2a20;
-    --proc:           #d4524a;
-    --proc-run:       #f6b9b2;
+    --proc-soft:      #235682;
+    --proc:           #4f93d8;
+    --proc-run:       #b9d7f4;
 
-    --accent:         #e0655b;
-    --accent-strong:  #f2a69f;
-    --accent-wash:    rgba(224, 101, 91, 0.14);
-    --on-accent:      #1b1a18;
+    --accent:         #5aa3e8;
+    --accent-strong:  #9ecbf5;
+    --accent-wash:    rgba(90, 163, 232, 0.14);
+    --on-accent:      #0b1013;
 
-    --idle:           #2e2b27;
-    --idle-ink:       #8a8075;
+    --ok:             #4cc79a;
+    --ok-wash:        rgba(76, 199, 154, 0.13);
 
-    --critical:       #e0655b;
+    --idle:           #242e35;
+    --idle-ink:       #7b8a93;
+
+    --critical:       #f2857c;
     --shadow:
       0 1px 1px rgba(0, 0, 0, .5),
       0 2px 5px rgba(0, 0, 0, .4),
@@ -141,35 +159,38 @@
       0 1px 2px rgba(0, 0, 0, .55),
       0 8px 18px rgba(0, 0, 0, .5),
       0 24px 50px rgba(0, 0, 0, .5);
-    --edge-top: inset 0 1px 0 rgba(247, 243, 236, .07);
+    --edge-top: inset 0 1px 0 rgba(238, 244, 246, .07);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page:           #0f0e0d;
-  --surface:        #1b1a18;
-  --surface-sunken: #161513;
-  --ink:            #f7f3ec;
-  --ink-2:          #c6bdb0;
-  --ink-muted:      #8a8075;
-  --grid:           #2e2b27;
-  --baseline:       #3b3732;
-  --hairline:       rgba(247, 243, 236, 0.12);
+  --page:           #0b1013;
+  --surface:        #141b20;
+  --surface-sunken: #10171b;
+  --ink:            #eef4f6;
+  --ink-2:          #b2c0c8;
+  --ink-muted:      #7b8a93;
+  --grid:           #242e35;
+  --baseline:       #323e46;
+  --hairline:       rgba(238, 244, 246, 0.12);
 
-  --proc-soft:      #8a2a20;
-  --proc:           #d4524a;
-  --proc-run:       #f6b9b2;
+  --proc-soft:      #235682;
+  --proc:           #4f93d8;
+  --proc-run:       #b9d7f4;
 
-  --accent:         #e0655b;
-  --accent-strong:  #f2a69f;
-  --accent-wash:    rgba(224, 101, 91, 0.14);
-  --on-accent:      #1b1a18;
+  --accent:         #5aa3e8;
+  --accent-strong:  #9ecbf5;
+  --accent-wash:    rgba(90, 163, 232, 0.14);
+  --on-accent:      #0b1013;
 
-  --idle:           #2e2b27;
-  --idle-ink:       #8a8075;
+  --ok:             #4cc79a;
+  --ok-wash:        rgba(76, 199, 154, 0.13);
 
-  --critical:       #e0655b;
+  --idle:           #242e35;
+  --idle-ink:       #7b8a93;
+
+  --critical:       #f2857c;
   --shadow:
     0 1px 1px rgba(0, 0, 0, .5),
     0 2px 5px rgba(0, 0, 0, .4),
@@ -178,7 +199,7 @@
     0 1px 2px rgba(0, 0, 0, .55),
     0 8px 18px rgba(0, 0, 0, .5),
     0 24px 50px rgba(0, 0, 0, .5);
-  --edge-top: inset 0 1px 0 rgba(247, 243, 236, .07);
+  --edge-top: inset 0 1px 0 rgba(238, 244, 246, .07);
 }
 
 * { box-sizing: border-box; }
@@ -194,7 +215,7 @@ body {
                     color-mix(in oklab, var(--accent) 7%, transparent) 0%,
                     transparent 60%),
     radial-gradient(900px 520px at 102% 2%,
-                    color-mix(in oklab, var(--accent) 4%, transparent) 0%,
+                    color-mix(in oklab, var(--ok) 5%, transparent) 0%,
                     transparent 55%),
     var(--page);
   background-attachment: fixed;
@@ -411,7 +432,6 @@ code {
 .algo[aria-checked="true"] {
   border-color: color-mix(in oklab, var(--accent) 55%, var(--hairline));
   background: var(--accent-wash);
-  box-shadow: 0 1px 10px -4px var(--accent);
 }
 .algo[aria-checked="true"]::before { transform: scaleY(1); }
 .algo-key {
@@ -482,7 +502,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   border-radius: var(--radius-sm); padding: 8px 15px;
   border: 1px solid var(--hairline); cursor: pointer;
   background: var(--surface); color: var(--ink);
-  box-shadow: 0 1px 2px rgba(20, 17, 14, .05);
+  box-shadow: 0 1px 2px rgba(8, 20, 28, .05);
   transition: background var(--dur-fast) var(--ease-soft),
               border-color var(--dur-fast) var(--ease-soft),
               box-shadow var(--dur-fast) var(--ease-soft),
@@ -491,29 +511,29 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 }
 .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
 .btn:active { transform: translateY(1px) scale(.99);
-              box-shadow: 0 1px 1px rgba(20, 17, 14, .08); }
+              box-shadow: 0 1px 1px rgba(8, 20, 28, .08); }
 .btn-primary {
   background: linear-gradient(177deg,
     color-mix(in oklab, var(--accent) 88%, #fff) 0%, var(--accent) 60%,
     color-mix(in oklab, var(--accent) 88%, var(--accent-strong)) 100%);
   border-color: color-mix(in oklab, var(--accent) 70%, var(--accent-strong));
   color: var(--on-accent);
-  box-shadow: 0 1px 2px rgba(20, 17, 14, .12),
-              inset 0 1px 0 rgba(255, 255, 255, .22);
+  box-shadow: 0 1px 2px rgba(8, 20, 28, .12),
+              inset 0 1px 0 rgba(255, 255, 255, .18);
 }
 .btn-primary:hover {
   background: linear-gradient(177deg, var(--accent) 0%,
               var(--accent-strong) 100%);
   border-color: var(--accent-strong);
-  box-shadow: 0 2px 4px rgba(20, 17, 14, .12),
-              0 10px 22px -8px var(--accent),
-              inset 0 1px 0 rgba(255, 255, 255, .22);
+  box-shadow: 0 2px 4px rgba(8, 20, 28, .12),
+              0 7px 16px -10px var(--accent),
+              inset 0 1px 0 rgba(255, 255, 255, .18);
 }
 /* a light sweeping across the primary button on hover */
 .btn-primary::after {
   content: ""; position: absolute; inset: 0; z-index: -1;
-  background: linear-gradient(112deg, transparent 32%,
-              rgba(255, 255, 255, .3) 48%, transparent 64%);
+  background: linear-gradient(112deg, transparent 34%,
+              rgba(255, 255, 255, .17) 48%, transparent 62%);
   transform: translateX(-135%);
   transition: transform var(--dur-slow) var(--ease-out);
 }
@@ -530,9 +550,17 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .btn-row .btn { flex: 1; }
 .run-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
+/* A solid --critical fill with light text only works in one theme: in the
+ * dark theme --critical is a light salmon, so near-white text on it was
+ * close to unreadable. A tinted box with --critical as the TEXT colour
+ * contrasts correctly in both, and shouts less. */
 .error {
-  margin: 0; font-size: 14.5px; color: #fffdf9;
-  background: var(--critical); border-radius: var(--radius-sm);
+  margin: 0; font-size: 14.5px;
+  color: var(--critical);
+  background: color-mix(in oklab, var(--critical) 12%, var(--surface));
+  border: 1px solid color-mix(in oklab, var(--critical) 40%, transparent);
+  border-left: 3px solid var(--critical);
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
 }
 
@@ -552,7 +580,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   position: relative; height: 42px; margin-top: 18px;
   border: 1px solid var(--hairline); border-radius: var(--radius-sm);
   background: var(--surface-sunken);
-  box-shadow: inset 0 1px 3px rgba(20, 17, 14, .06);
+  box-shadow: inset 0 1px 3px rgba(8, 20, 28, .06);
   overflow: hidden;
 }
 .ghost-row { position: absolute; inset: 0; }
@@ -593,8 +621,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .clock { margin-left: auto; display: flex; align-items: baseline; gap: 6px; }
 .clock-label { font-size: 13.5px; color: var(--ink-muted); font-style: italic; }
 .clock-value { font-size: 30px; font-weight: 700; line-height: 1;
-               font-variant-numeric: tabular-nums; color: var(--accent);
-               text-shadow: 0 0 22px var(--accent-wash); }
+               font-variant-numeric: tabular-nums; color: var(--accent); }
 .clock-total { font-size: 13.5px; color: var(--ink-muted);
                font-variant-numeric: tabular-nums; }
 .scrub { width: 100%; }
@@ -622,8 +649,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
  * tell at a glance that the clock is moving. */
 .cpu-now::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(100deg, transparent 38%,
-              var(--accent-wash) 50%, transparent 62%);
+  background: linear-gradient(100deg, transparent 40%,
+              var(--accent-wash) 50%, transparent 60%);
   background-size: 280% 100%;
   animation: wash 2.6s linear infinite;
 }
@@ -641,10 +668,15 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   animation: pop var(--dur-mid) var(--ease-out) backwards;
   animation-delay: calc(min(var(--i, 0), 10) * 30ms);
 }
-/* finished is neutral plus a check glyph, never green: with a red accent
- * the page must not put red and green beside each other. */
-.chip.done { border-color: var(--baseline); color: var(--ink); }
-.chip.done::before { content: "\2713\00a0"; color: var(--ink-muted); }
+/* Finished is the one green on the page. The check glyph stays, so the
+ * state survives with no colour vision at all -- which is what lets green
+ * sit on a page whose charts are blue. */
+.chip.done {
+  border-color: color-mix(in oklab, var(--ok) 38%, var(--hairline));
+  background: color-mix(in oklab, var(--ok) 9%, var(--surface-sunken));
+  color: var(--ok);
+}
+.chip.done::before { content: "\2713\00a0"; }
 .chip .chip-rem { color: var(--ink-muted); font-style: italic; }
 .chips-empty { font-size: 13.5px; color: var(--ink-muted); font-style: italic; }
 
@@ -680,7 +712,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   background: var(--surface-sunken);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
-  box-shadow: inset 0 1px 3px rgba(20, 17, 14, .07);
+  box-shadow: inset 0 1px 3px rgba(8, 20, 28, .07);
   overflow: hidden;
 }
 /* One rule per unit of time. The bars cover the chart edge to edge, so the
@@ -706,25 +738,25 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   position: absolute; inset: 0 auto 0 0;
   overflow: hidden;
   background: linear-gradient(177deg,
-    color-mix(in oklab, var(--proc) 86%, var(--surface)) 0%,
+    color-mix(in oklab, var(--proc) 93%, var(--surface)) 0%,
     var(--proc) 46%,
-    color-mix(in oklab, var(--proc) 88%, var(--ink)) 100%);
+    color-mix(in oklab, var(--proc) 94%, var(--ink)) 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18);
   border-radius: var(--bar-radius);
   width: 0;
 }
 .seg.running .seg-fill {
   background: linear-gradient(177deg,
-    color-mix(in oklab, var(--proc-run) 84%, var(--surface)) 0%,
+    color-mix(in oklab, var(--proc-run) 93%, var(--surface)) 0%,
     var(--proc-run) 46%,
-    color-mix(in oklab, var(--proc-run) 88%, var(--ink)) 100%);
+    color-mix(in oklab, var(--proc-run) 94%, var(--ink)) 100%);
 }
 /* A highlight travelling along whichever bar currently owns the CPU. */
 .seg.running .seg-fill::after {
   content: ""; position: absolute; inset: 0;
-  background: linear-gradient(104deg, transparent 36%,
-              color-mix(in oklab, var(--surface) 42%, transparent) 50%,
-              transparent 64%);
+  background: linear-gradient(104deg, transparent 38%,
+              color-mix(in oklab, var(--surface) 30%, transparent) 50%,
+              transparent 62%);
   background-size: 300% 100%;
   animation: wash 1.5s linear infinite;
 }
@@ -762,7 +794,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .playhead {
   position: absolute; top: -4px; bottom: -4px; width: 2px;
   background: var(--ink); z-index: 5; pointer-events: none;
-  box-shadow: 0 0 10px 1px color-mix(in oklab, var(--ink) 40%, transparent);
+  box-shadow: 0 0 7px 0 color-mix(in oklab, var(--ink) 28%, transparent);
   transition: left .04s linear;
 }
 .playhead::after {
@@ -824,13 +856,13 @@ body.is-playing .playhead::before {
     var(--surface-sunken);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
-  box-shadow: inset 0 1px 2px rgba(20, 17, 14, .06);
+  box-shadow: inset 0 1px 2px rgba(8, 20, 28, .06);
   transition: border-color var(--dur-mid) var(--ease-soft),
               box-shadow var(--dur-mid) var(--ease-soft);
 }
 .lane-track.is-running {
   border-color: var(--proc-run);
-  box-shadow: inset 0 1px 2px rgba(20, 17, 14, .06),
+  box-shadow: inset 0 1px 2px rgba(8, 20, 28, .06),
               0 0 0 3px var(--accent-wash);
 }
 .lane-seg {
@@ -882,7 +914,7 @@ body.is-playing .playhead::before {
   transition: transform var(--dur-mid) var(--ease-out);
 }
 .tile:hover {
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   box-shadow: var(--shadow-lift), var(--edge-top);
   border-color: color-mix(in oklab, var(--accent) 30%, var(--hairline));
 }
@@ -931,7 +963,7 @@ td.best { color: var(--ink); font-weight: 700; }
 tr.row-running td { background: var(--accent-wash); }
 tr.row-running td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 tr.row-done td:first-child::after {
-  content: "\2713"; color: var(--ink-muted); margin-left: 7px;
+  content: "\2713"; color: var(--ok); margin-left: 7px;
   font-weight: 700;
 }
 
@@ -991,14 +1023,14 @@ tr.row-done td:first-child::after {
       var(--grid) 0 1px, transparent 1px var(--unit, 100%)),
     var(--surface-sunken);
   border: 1px solid var(--hairline); border-radius: var(--radius-sm);
-  box-shadow: inset 0 1px 2px rgba(20, 17, 14, .06);
+  box-shadow: inset 0 1px 2px rgba(8, 20, 28, .06);
   overflow: hidden;
 }
 .cmp-seg { position: absolute; top: 2px; bottom: 2px;
            background: linear-gradient(177deg,
-             color-mix(in oklab, var(--proc) 86%, var(--surface)) 0%,
+             color-mix(in oklab, var(--proc) 93%, var(--surface)) 0%,
              var(--proc) 46%,
-             color-mix(in oklab, var(--proc) 88%, var(--ink)) 100%);
+             color-mix(in oklab, var(--proc) 94%, var(--ink)) 100%);
            border-radius: 3px;
            box-shadow: 0 0 0 var(--gap) var(--surface-sunken),
                        inset 0 1px 0 rgba(255, 255, 255, .16); }
