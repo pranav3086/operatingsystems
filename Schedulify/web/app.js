@@ -15,6 +15,11 @@
  *
  * If you are tempted to work out a schedule here: don't. Add it to
  * src/sched_*.c and let metrics.c derive the numbers from the timeline.
+ *
+ * The same goes for the predictive analysis: the arrival rate, the Poisson
+ * probabilities, the predicted processes, the stability checks and the
+ * original-vs-forecast comparison all come from src/predict.c and
+ * src/webapp.c. This file only lays them out.
  */
 'use strict';
 
@@ -56,7 +61,10 @@ const state = {
   algo: 'srtf',
   quantum: 2,
   rows: [],            // { id, arrival, burst, priority }
-  result: null,        // the engine's reply, verbatim
+  result: null,        // the schedule on screen, verbatim from the engine
+  resultKind: 'plain', // 'plain' | 'original' | 'augmented'
+  forecast: null,      // { data, basis } -- /api/forecast reply + workload it came from
+  forecastSim: null,   // /api/forecast/simulate reply
   clock: 0,
   playing: false,
   speed: 4,
@@ -113,6 +121,7 @@ function renderRows() {
           : String(row[key]).trim() === '';
         inp.classList.toggle('bad', bad);
         if (key === 'id') $('#proc-count').textContent = String(state.rows.length);
+        syncForecastStale();
       });
       return inp;
     };
@@ -137,6 +146,7 @@ function renderRows() {
   });
 
   $('#proc-count').textContent = String(state.rows.length);
+  syncForecastStale();
 }
 
 function setRows(procs) {
@@ -210,19 +220,27 @@ function showError(msg) {
   box.textContent = msg;
 }
 
+/* Puts one engine schedule into the main timeline and plays it. kind says
+ * which workload it is, so the chart can label a forecast-augmented run. */
+function showSchedule(data, kind) {
+  state.result = data;
+  state.resultKind = kind;
+  $('#empty-state').hidden = true;
+  $('#result-view').hidden = false;
+  buildChart();
+  stopPlayback();
+  setClock(data.window.start);
+  startPlayback();
+  syncViewToggle();
+}
+
 async function run() {
   showError(null);
   $('#run').disabled = true;
   try {
     const data = await api('/api/simulate', workloadPayload());
-    state.result = data;
-    $('#empty-state').hidden = true;
-    $('#result-view').hidden = false;
     $('#compare-view').hidden = true;
-    buildChart();
-    stopPlayback();
-    setClock(data.window.start);
-    startPlayback();
+    showSchedule(data, 'plain');
   } catch (e) {
     showError(e.message);
   } finally {
@@ -261,13 +279,15 @@ function buildChart() {
   const r = state.result;
   const a = r.algorithm;
 
-  $('#gantt-title').textContent = `${a.key} — ${a.name}`;
+  const nPred = r.processes.filter((p) => p.predicted).length;
+  const which = state.resultKind === 'augmented' ? ' · with forecast'
+              : state.resultKind === 'original' ? ' · original workload' : '';
+  $('#gantt-title').textContent = `${a.key} — ${a.name}${which}`;
   $('#gantt-sub').textContent =
-    a.needsQuantum
-      ? `${a.kind}, quantum ${a.quantum} · ${r.processes.length} processes · `
-        + `t=${r.window.start} to t=${r.window.end}`
-      : `${a.kind} · ${r.processes.length} processes · `
-        + `t=${r.window.start} to t=${r.window.end}`;
+    (a.needsQuantum ? `${a.kind}, quantum ${a.quantum}` : a.kind)
+    + ` · ${r.processes.length} processes`
+    + (nPred ? ` (${nPred} predicted, dashed outline)` : '')
+    + ` · t=${r.window.start} to t=${r.window.end}`;
 
   $('#clock-end').textContent = `/ ${r.window.end}`;
 
@@ -289,7 +309,16 @@ function segTooltip(s) {
   const dur = s.end - s.start;
   return s.idle
     ? `<b>CPU idle</b><br>t=${s.start} to t=${s.end} (${dur} unit${dur === 1 ? '' : 's'})<br>nothing was ready to run`
-    : `<b>${s.id}</b> on the CPU<br>t=${s.start} to t=${s.end} (${dur} unit${dur === 1 ? '' : 's'})`;
+    : `<b>${s.id}</b> on the CPU${isPredicted(s.id) ? ' (predicted process)' : ''}`
+      + `<br>t=${s.start} to t=${s.end} (${dur} unit${dur === 1 ? '' : 's'})`;
+}
+
+/* Whether the schedule on screen marks this process as forecast-generated
+ * (a flag the engine sets; nothing is inferred from the id). */
+function isPredicted(id) {
+  const r = state.result;
+  const p = r && r.processes.find((x) => x.id === id);
+  return Boolean(p && p.predicted);
 }
 
 function attachTooltip(node, html) {
@@ -317,7 +346,8 @@ function buildGantt() {
   const r = state.result;
 
   r.segments.forEach((s, i) => {
-    const node = stagger(el('div', 'seg' + (s.idle ? ' idle' : '')), i);
+    const node = stagger(el('div', 'seg' + (s.idle ? ' idle' : '')
+                                   + (isPredicted(s.id) ? ' predicted' : '')), i);
     node.style.left = `${pct(s.start)}%`;
     node.style.width = `${pct(s.end) - pct(s.start)}%`;
     node.dataset.seg = String(i);
@@ -358,10 +388,16 @@ function buildLanes() {
   const r = state.result;
 
   r.processes.forEach((p, i) => {
-    const lane = stagger(el('div', 'lane'), i);
+    const lane = stagger(el('div', 'lane' + (p.predicted ? ' predicted' : '')), i);
     const name = el('div', 'lane-name');
     name.append(el('span', null, p.id));
     name.append(document.createElement('br'));
+    /* on its own line: the name column is narrow, and a tag beside the id
+     * would push the id itself into the ellipsis */
+    if (p.predicted) {
+      name.append(el('span', 'tag tag-lane', 'forecast'));
+      name.append(document.createElement('br'));
+    }
     name.append(el('span', 'lane-meta', `a${p.arrival} · b${p.burst} · p${p.priority}`));
     lane.append(name);
 
@@ -432,7 +468,12 @@ function buildTiles() {
     ['CPU idle',       String(m.idleTime), 'units', 'nothing was ready'],
     ['Makespan',       String(m.totalTime), 'units', `t=${state.result.window.start} → ${state.result.window.end}`]
   ];
+  renderTiles(host, tiles);
+}
 
+/* tiles: [label, value, unit, note] -- shared by the metric and forecast panels */
+function renderTiles(host, tiles) {
+  host.textContent = '';
   tiles.forEach(([label, value, unit, note], i) => {
     const t = stagger(el('div', 'tile'), i);
     t.append(el('div', 'tile-label', label));
@@ -454,9 +495,12 @@ function buildTable() {
   r.processes.forEach((p, i) => {
     const tr = stagger(el('tr'), i);
     tr.dataset.pid = p.id;
+    if (p.predicted) tr.classList.add('row-predicted');
     [p.id, p.arrival, p.burst, p.priority, p.start, p.completion,
-     p.turnaround, p.waiting, p.response].forEach((v) => {
-      tr.append(el('td', null, String(v)));
+     p.turnaround, p.waiting, p.response].forEach((v, c) => {
+      const td = el('td', null, String(v));
+      if (c === 0 && p.predicted) td.append(el('span', 'tag', 'forecast'));
+      tr.append(td);
     });
     tb.append(tr);
   });
@@ -783,6 +827,366 @@ function renderComparison(data) {
   });
 }
 
+/* ───────────────────────────── predictive analysis ──────────────── */
+
+/* Every statistic below arrives computed from /api/forecast; these only
+ * format it. */
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const prob = (p) => {
+  if (typeof p !== 'number' || !isFinite(p)) return '—';
+  if (p === 0 || p === 1) return `${p * 100}%`;
+  if (p < 0.001) return '< 0.1%';
+  if (p > 0.999) return '> 99.9%';
+  return `${(p * 100).toFixed(1)}%`;
+};
+
+const pval = (p) => (typeof p !== 'number' || !isFinite(p)) ? '—'
+  : p < 0.001 ? '< 0.001' : p.toFixed(3);
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+function showForecastError(msg) {
+  const box = $('#fc-error');
+  box.hidden = !msg;
+  box.textContent = msg || '';
+}
+
+/* The forecast belongs to the workload it was generated from. */
+function workloadSignature() {
+  return JSON.stringify(workloadPayload().processes);
+}
+
+function syncForecastStale() {
+  const f = state.forecast;
+  const stale = Boolean(f) && workloadSignature() !== f.basis;
+  $('#fc-stale').hidden = !stale;
+  $('#fc-simulate').disabled = !f || stale;
+}
+
+function syncViewToggle() {
+  $('#fc-show-original').setAttribute('aria-pressed', String(state.resultKind === 'original'));
+  $('#fc-show-augmented').setAttribute('aria-pressed', String(state.resultKind === 'augmented'));
+}
+
+/* Blank fields are left out so the engine applies its documented defaults;
+ * anything typed is sent as-is and validated in C. */
+function forecastPayload() {
+  const body = { processes: workloadPayload().processes };
+  const take = (sel, key) => {
+    const raw = $(sel).value.trim();
+    if (raw !== '') body[key] = Number(raw);
+  };
+  take('#fc-horizon', 'horizon');
+  if ($('#fc-window-mode').value === 'explicit') {
+    take('#fc-obs-start', 'observationStart');
+    take('#fc-obs-end', 'observationEnd');
+    if (!('observationEnd' in body)) {
+      throw new Error('Enter where the observation window ends, or choose "Infer from arrival gaps".');
+    }
+  }
+  take('#fc-cap', 'maxGenerated');
+  take('#fc-seed', 'seed');
+  return body;
+}
+
+async function generateForecast() {
+  showForecastError(null);
+  $('#fc-generate').disabled = true;
+  try {
+    const payload = forecastPayload();
+    const data = await api('/api/forecast', payload);
+    const oldSim = state.forecastSim;
+
+    state.forecast = { data, basis: JSON.stringify(payload.processes) };
+    state.forecastSim = null;
+    /* a schedule built from the previous forecast no longer matches it */
+    if (oldSim && state.resultKind !== 'plain') showSchedule(oldSim.original, 'plain');
+
+    renderForecast();
+    $('#forecast-view').hidden = false;
+    $('#fc-compare').hidden = true;
+    $('#fc-reset').disabled = false;
+    syncForecastStale();
+    $('#forecast-view').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    showForecastError(e.message);
+  } finally {
+    $('#fc-generate').disabled = false;
+  }
+}
+
+async function simulateForecast() {
+  const f = state.forecast;
+  showForecastError(null);
+  if (!f) return;
+  if (workloadSignature() !== f.basis) {
+    showForecastError('The workload has changed since this forecast was generated. Generate it again first.');
+    return;
+  }
+  $('#fc-simulate').disabled = true;
+  try {
+    const base = workloadPayload();
+    const data = await api('/api/forecast/simulate', {
+      algorithm: base.algorithm,
+      quantum: base.quantum,
+      processes: base.processes,
+      predicted: f.data.predicted.map(({ id, arrival, burst, priority }) =>
+        ({ id, arrival, burst, priority }))
+    });
+    state.forecastSim = data;
+    renderForecastComparison();
+    $('#fc-compare').hidden = false;
+    $('#compare-view').hidden = true;
+    showSchedule(data.augmented, 'augmented');
+    $('#result-view').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    showForecastError(e.message);
+  } finally {
+    syncForecastStale();
+  }
+}
+
+/* Clears the forecast only. The workload in the editor is never touched. */
+function resetForecast() {
+  const sim = state.forecastSim;
+  state.forecast = null;
+  state.forecastSim = null;
+  $('#forecast-view').hidden = true;
+  $('#fc-compare').hidden = true;
+  $('#fc-reset').disabled = true;
+  showForecastError(null);
+  syncForecastStale();
+  if (sim && state.resultKind !== 'plain') showSchedule(sim.original, 'plain');
+}
+
+function renderForecast() {
+  const d = state.forecast.data;
+  const o = d.observation;
+  const f = d.forecast;
+  const b = d.bursts;
+
+  $('#fc-assumption').textContent = o.assumption;
+
+  const wl = $('#fc-warnings');
+  wl.textContent = '';
+  d.warnings.forEach((w, i) => wl.append(stagger(el('li', null, w), i)));
+  wl.hidden = d.warnings.length === 0;
+
+  renderTiles($('#fc-tiles'), [
+    ['Arrival rate λ', fmt(d.rate.lambda, 3), '/unit',
+     `standard error ≈ ${fmt(d.rate.standardError, 3)}`],
+    ['Observation window', String(o.duration), 'units',
+     `t=${o.start} → ${o.end}, ${o.mode === 'explicit' ? 'as given' : 'inferred'}`],
+    ['Observed', String(o.processes), 'processes',
+     o.mode === 'explicit'
+       ? `${plural(o.events, 'arrival', 'arrivals')} in λ · ${plural(o.intervals, 'gap', 'gaps')}`
+       : `${plural(o.events, 'gap', 'gaps')} between arrivals in λ`],
+    ['Expected arrivals', fmt(f.expected, 2), '',
+     `E[K] = λ × ${f.horizon}, over t=${f.start} → ${f.end}`],
+    ['P(no arrivals)', prob(f.pZero), '', `P(at least one): ${prob(f.pAtLeastOne)}`],
+    ['90% of outcomes', `${f.range90.low}–${f.range90.high}`, 'arrivals',
+     'central range of the Poisson count'],
+    ['This draw', String(f.generated), f.generated === 1 ? 'process' : 'processes',
+     `seed ${d.seed}${f.truncated ? ` · stopped at the cap of ${f.cap}` : ''}`],
+    ['Burst time', fmt(b.mean, 2), 'mean',
+     b.sd === null ? 'sd needs at least 2 samples'
+                   : `sd ${fmt(b.sd, 2)} · ${b.samples} samples, ${b.min}–${b.max}`]
+  ]);
+
+  renderArrivalChart();
+  renderPmf();
+  renderDiagnostics();
+  renderPredictedTable();
+}
+
+/* Nice round tick values across [a, b] for an axis. */
+function niceTicks(a, b, want) {
+  const span = Math.max(1, b - a);
+  const raw = span / want;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = Math.max(1, [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw) || mag * 10);
+  const out = [];
+  for (let t = Math.ceil(a / step) * step; t <= b; t += step) out.push(t);
+  return out;
+}
+
+function renderArrivalChart() {
+  const d = state.forecast.data;
+  const o = d.observation;
+  const f = d.forecast;
+  const observed = JSON.parse(state.forecast.basis);
+  const host = $('#fc-arrivals');
+  const ruler = $('#fc-arrivals-ruler');
+  host.textContent = '';
+  ruler.textContent = '';
+
+  const t0 = Math.min(o.start, ...observed.map((p) => p.arrival));
+  const t1 = f.end;
+  const span = Math.max(1, t1 - t0);
+  const x = (t) => ((t - t0) / span) * 100;
+
+  const band = (cls, a, b, tip) => {
+    const n = el('div', `fc-band ${cls}`);
+    n.style.left = `${x(a)}%`;
+    n.style.width = `${x(b) - x(a)}%`;
+    attachTooltip(n, tip);
+    host.append(n);
+  };
+  band('fc-band-window', o.start, o.end,
+       `<b>Observation window</b><br>t=${o.start} to t=${o.end} (${o.duration} units, ${o.mode === 'explicit' ? 'as given' : 'inferred from the arrivals'})`);
+  band('fc-band-horizon', f.start, f.end,
+       `<b>Forecast horizon</b><br>t=${f.start} to t=${f.end}: arrivals expected ${fmt(f.expected, 2)}, this draw ${f.generated}`);
+
+  /* processes arriving at the same instant stack upwards */
+  const stack = {};
+  let levels = 1;
+  const dot = (p, predicted, i) => {
+    const lvl = stack[p.arrival] = (stack[p.arrival] || 0) + 1;
+    levels = Math.max(levels, lvl);
+    const n = stagger(el('div', `arr-dot${predicted ? ' predicted' : ''}`), i);
+    n.style.left = `${x(p.arrival)}%`;
+    n.style.setProperty('--lvl', String(lvl - 1));
+    attachTooltip(n, `<b>${esc(p.id)}</b> ${predicted ? 'predicted' : 'observed'} arrival`
+      + `<br>t=${p.arrival} · burst ${p.burst} · priority ${p.priority}`);
+    host.append(n);
+  };
+  observed.forEach((p, i) => dot(p, false, i));
+  d.predicted.forEach((p, i) => dot(p, true, observed.length + i));
+  host.style.setProperty('--levels', String(Math.min(levels, 12)));
+
+  host.setAttribute('aria-label',
+    `${observed.length} observed arrivals from t=${t0}; ${d.predicted.length} predicted arrivals between t=${f.start} and t=${f.end}`);
+
+  niceTicks(t0, t1, 8).forEach((t, i) => {
+    const tick = stagger(el('div', 'tick', String(t)), i);
+    tick.style.left = `${x(t)}%`;
+    ruler.append(tick);
+  });
+}
+
+function renderPmf() {
+  const f = state.forecast.data.forecast;
+  const host = $('#fc-pmf');
+  const axis = $('#fc-pmf-axis');
+  host.textContent = '';
+  axis.textContent = '';
+  const pm = f.pmf;
+  if (!pm.length) return;
+
+  const maxP = Math.max(...pm.map((b) => b.p)) || 1;
+  pm.forEach((b, i) => {
+    const bar = stagger(el('div', 'pmf-bar'), i);
+    if (b.k < f.range90.low || b.k > f.range90.high) bar.classList.add('out');
+    if (b.k === f.generated && !f.truncated) bar.classList.add('drawn');
+    bar.style.height = `${Math.max(1, (b.p / maxP) * 100)}%`;
+    attachTooltip(bar, `P(K = ${b.k}) = ${prob(b.p)}`
+      + (b.k === f.generated ? `<br>${f.truncated ? 'the cap' : 'this draw'}` : ''));
+    host.append(bar);
+  });
+  host.setAttribute('aria-label',
+    `Poisson probabilities of ${pm[0].k} to ${pm[pm.length - 1].k} arrivals; expected ${fmt(f.expected, 2)}`);
+
+  const step = Math.max(1, Math.ceil(pm.length / 8));
+  pm.forEach((b, i) => {
+    if (i % step !== 0 && i !== pm.length - 1) return;
+    const t = el('span', null, String(b.k));
+    t.style.left = `${((i + 0.5) / pm.length) * 100}%`;
+    axis.append(t);
+  });
+
+  const shown = f.generated >= pm[0].k && f.generated <= pm[pm.length - 1].k;
+  let note = `P(K = k) for K ~ Poisson(λh = ${fmt(f.expected, 2)}). Full-strength bars are the central 90% `
+    + `(${f.range90.low}–${f.range90.high}); faint bars lie outside it.`;
+  if (f.truncated) {
+    note += ` This draw hit the cap of ${f.cap}, so it is not a sample from this distribution`
+      + ` (P(K > ${f.cap}): ${prob(f.pCapExceeded)}).`;
+  } else {
+    note += shown ? ` The outlined bar is this draw (K = ${f.generated}).`
+                  : ` This draw (K = ${f.generated}) lies outside the bars shown.`;
+    if (f.capFromUser) note += ` P(K > cap of ${f.cap}): ${prob(f.pCapExceeded)}.`;
+  }
+  $('#fc-pmf-note').textContent = note;
+}
+
+function renderDiagnostics() {
+  const d = state.forecast.data;
+  const o = d.observation;
+  const s = d.stability;
+  const sp = s.split;
+  const ds = s.dispersion;
+  const tb = $('#fc-diag tbody');
+  tb.textContent = '';
+
+  const rows = [
+    ['Arrivals the checks use',
+     `${s.testEvents} ${o.mode === 'explicit' ? '(every arrival in the window)'
+                                                : '(those strictly between the first and last, which define the window)'}`],
+    ['Rate, first vs second half',
+     sp.valid
+       ? `${fmt(sp.firstRate, 3)} vs ${fmt(sp.secondRate, 3)} per unit (${sp.firstCount} / ${sp.secondCount}); `
+         + `exact binomial p = ${pval(sp.pValue)}: `
+         + (sp.pValue < 0.05 ? 'the rate appears to change' : 'no evidence of a change')
+       : `not run: needs at least ${sp.minEvents} arrivals, has ${s.testEvents}`],
+    ['Count dispersion',
+     ds.valid
+       ? `variance/mean = ${fmt(ds.varianceToMean, 2)} over ${ds.bins} equal bins (Poisson ≈ 1); `
+         + (ds.pOver < 0.05 ? `burstier than Poisson, p = ${pval(ds.pOver)}`
+            : ds.pUnder < 0.05 ? `more regular than Poisson, p = ${pval(ds.pUnder)}`
+            : 'consistent with Poisson at the 5% level')
+       : `not run: needs at least ${ds.minEvents} arrivals, has ${s.testEvents}`],
+    ['Simultaneous observed arrivals', String(s.simultaneousArrivals)],
+    ['Predicted arrivals sharing a time unit',
+     `${d.forecast.tiedArrivals}${d.forecast.tiedArrivals ? " (ordered by the scheduler's tie-break rules)" : ''}`],
+    ['Mean observed gap', o.meanGap === null ? '— (one arrival)' : `${fmt(o.meanGap, 2)} units`],
+    ['Random seed', `${d.seed} (same seed and settings reproduce this forecast exactly)`]
+  ];
+  rows.forEach(([k, v], i) => {
+    const tr = stagger(el('tr'), i);
+    tr.append(el('td', null, k));
+    tr.append(el('td', null, v));
+    tb.append(tr);
+  });
+}
+
+function renderPredictedTable() {
+  const pred = state.forecast.data.predicted;
+  const tb = $('#fc-table tbody');
+  tb.textContent = '';
+  pred.forEach((p, i) => {
+    const tr = stagger(el('tr', 'row-predicted'), i);
+    [p.id, p.arrival, p.burst, p.priority].forEach((v) => tr.append(el('td', null, String(v))));
+    const src = el('td');
+    src.append(el('span', 'tag', 'forecast'));
+    tr.append(src);
+    tb.append(tr);
+  });
+  $('#fc-table-empty').hidden = pred.length > 0;
+}
+
+function renderForecastComparison() {
+  const d = state.forecastSim;
+  const a = d.augmented.algorithm;
+  $('#fc-algo').textContent = a.needsQuantum ? `${a.key} (quantum ${a.quantum})` : a.key;
+
+  const tb = $('#fc-cmp-table tbody');
+  tb.textContent = '';
+  d.comparison.forEach((r, i) => {
+    const tr = stagger(el('tr'), i);
+    const show = (v) => (r.decimals ? fmt(v, r.decimals) : String(v));
+    tr.append(el('td', null, r.label));
+    tr.append(el('td', null, show(r.original)));
+    tr.append(el('td', null, show(r.augmented)));
+    /* the sign of a difference the engine computed, spelled out */
+    const same = Math.abs(r.change) < 1e-9;
+    const td = el('td', 'change', same ? '0' : `${r.change > 0 ? '+' : '−'}${show(Math.abs(r.change))}`);
+    td.append(el('span', 'change-word', same ? 'no change' : r.change > 0 ? 'higher' : 'lower'));
+    tr.append(td);
+    tb.append(tr);
+  });
+}
+
 /* ───────────────────────────── theme ───────────────────────────── */
 
 function applyTheme(mode) {
@@ -858,6 +1262,19 @@ function wireControls() {
 
   $('#run').addEventListener('click', run);
   $('#compare').addEventListener('click', compareAll);
+
+  $('#fc-window-mode').addEventListener('change', (ev) => {
+    $('#fc-window').hidden = ev.target.value !== 'explicit';
+  });
+  $('#fc-generate').addEventListener('click', generateForecast);
+  $('#fc-simulate').addEventListener('click', simulateForecast);
+  $('#fc-reset').addEventListener('click', resetForecast);
+  $('#fc-show-original').addEventListener('click', () => {
+    if (state.forecastSim) showSchedule(state.forecastSim.original, 'original');
+  });
+  $('#fc-show-augmented').addEventListener('click', () => {
+    if (state.forecastSim) showSchedule(state.forecastSim.augmented, 'augmented');
+  });
 
   $('#play').addEventListener('click', togglePlay);
   $('#step-fwd').addEventListener('click', () => stepTo(+1));

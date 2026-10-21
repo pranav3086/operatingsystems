@@ -85,6 +85,52 @@
       <button id="compare" class="btn btn-soft" type="button">Compare all six</button>
     </div>
     <p id="error" class="error" role="alert" hidden></p>
+
+    <section class="block" aria-labelledby="fc-title">
+      <h2 id="fc-title" class="block-title">Predictive analysis</h2>
+      <p class="hint">
+        Generates one <em>possible</em> continuation of this workload:
+        Poisson arrivals at the rate observed above, with bursts and
+        priorities resampled from the processes above.
+      </p>
+
+      <label class="field">
+        <span>Forecast horizon</span>
+        <input type="number" id="fc-horizon" min="1" placeholder="= window" aria-describedby="fc-horizon-hint">
+      </label>
+      <p id="fc-horizon-hint" class="hint">Time units to forecast. Blank uses the observation window's length.</p>
+
+      <label class="field field-stack">
+        <span>Observation window</span>
+        <select id="fc-window-mode" aria-describedby="fc-window-hint">
+          <option value="gaps">Infer from arrival gaps</option>
+          <option value="explicit">I know the window</option>
+        </select>
+      </label>
+      <div id="fc-window" class="field-pair" hidden>
+        <label class="field"><span>from t =</span><input type="number" id="fc-obs-start" min="0" value="0"></label>
+        <label class="field"><span>to t =</span><input type="number" id="fc-obs-end" min="1" placeholder="end"></label>
+      </div>
+      <p id="fc-window-hint" class="hint">The workload doesn't record how long it was watched. Inferring treats the first and last arrivals as the window's edges; if you know the real window, enter it.</p>
+
+      <label class="field">
+        <span>Max predicted processes</span>
+        <input type="number" id="fc-cap" min="1" placeholder="no cap" aria-describedby="fc-cap-hint">
+      </label>
+      <p id="fc-cap-hint" class="hint">Optional. A cap stops generation early, so the count is censored and no longer Poisson; the forecast says when that happens.</p>
+
+      <label class="field">
+        <span>Random seed</span>
+        <input type="number" id="fc-seed" min="0" max="2147483647" value="42">
+      </label>
+
+      <button id="fc-generate" class="btn btn-soft" type="button">Generate forecast</button>
+      <div class="btn-row">
+        <button id="fc-simulate" class="btn btn-primary" type="button" disabled>Simulate predicted workload</button>
+        <button id="fc-reset" class="btn btn-ghost" type="button" disabled>Reset</button>
+      </div>
+      <p id="fc-error" class="error" role="alert" hidden></p>
+    </section>
   </aside>
 
   <!-- ─────────────── results ─────────────── -->
@@ -241,6 +287,100 @@
         idles — the differences live in the averages and the switch counts.
       </p>
       <div id="cmp-charts" class="cmp-charts"></div>
+    </section>
+
+    <!-- predictive analysis -->
+    <section id="forecast-view" class="panel forecast" hidden aria-labelledby="fcv-title">
+      <h2 id="fcv-title" class="block-title">Predictive analysis</h2>
+      <p class="forecast-lede">
+        A statistically generated <em>possible</em> workload, not a prediction
+        of events that will happen. Every number below is computed by the C
+        engine (<code>src/predict.c</code>).
+      </p>
+      <p id="fc-stale" class="stale-note" hidden>
+        The workload has changed since this forecast was generated. Generate it again before simulating.
+      </p>
+      <p id="fc-assumption" class="rule-text"></p>
+      <ul id="fc-warnings" class="warnings" aria-label="Warnings about this forecast"></ul>
+
+      <div id="fc-tiles" class="tiles"></div>
+
+      <h3 class="micro-title spaced">Arrivals: observed and predicted</h3>
+      <div class="legend">
+        <span class="legend-item"><i class="sw sw-obs"></i>observed arrival</span>
+        <span class="legend-item"><i class="sw sw-pred"></i>predicted arrival</span>
+        <span class="legend-item"><i class="sw sw-window"></i>observation window</span>
+        <span class="legend-item"><i class="sw sw-horizon"></i>forecast horizon</span>
+      </div>
+      <div class="fc-arrivals-wrap">
+        <div id="fc-arrivals" class="fc-arrivals" role="img" aria-label="Observed and predicted arrival times"></div>
+        <div id="fc-arrivals-ruler" class="ruler"></div>
+      </div>
+
+      <div class="fc-grid">
+        <div>
+          <h3 class="micro-title spaced">Arrival-count model</h3>
+          <div id="fc-pmf" class="pmf" role="img"></div>
+          <div id="fc-pmf-axis" class="pmf-axis"></div>
+          <p id="fc-pmf-note" class="hint"></p>
+        </div>
+        <div>
+          <h3 class="micro-title spaced">Stability checks</h3>
+          <div class="table-scroll">
+            <table id="fc-diag" class="data diag">
+              <thead><tr><th scope="col">Check</th><th scope="col">Result</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="hint">
+            A homogeneous Poisson process assumes a steady average rate and
+            independent arrivals. Real workloads are often bursty or
+            correlated. Passing these checks does not show that the model is
+            accurate, only that this small sample does not contradict it.
+          </p>
+        </div>
+      </div>
+
+      <h3 class="micro-title spaced">Predicted processes</h3>
+      <div class="table-scroll">
+        <table id="fc-table" class="data">
+          <thead>
+            <tr>
+              <th scope="col">Process</th><th scope="col">Arrival</th>
+              <th scope="col">Burst</th><th scope="col">Prio</th>
+              <th scope="col">Source</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="fc-table-empty" class="hint" hidden>This draw produced no arrivals within the horizon.</p>
+
+      <div id="fc-compare" hidden>
+        <h3 class="micro-title spaced">Original vs forecast-augmented: <span id="fc-algo"></span></h3>
+        <div class="view-toggle" role="group" aria-label="Schedule shown in the timeline above">
+          <span class="hint">Timeline above shows:</span>
+          <button id="fc-show-original" class="btn btn-soft" type="button" aria-pressed="false">Original workload</button>
+          <button id="fc-show-augmented" class="btn btn-soft" type="button" aria-pressed="true">With forecast</button>
+        </div>
+        <div class="table-scroll">
+          <table id="fc-cmp-table" class="data">
+            <thead>
+              <tr>
+                <th scope="col">Metric</th><th scope="col">Original</th>
+                <th scope="col">With forecast</th><th scope="col">Change</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="hint">
+          Both columns come from the same scheduler and the same metric
+          definitions. "Your original processes" rows average only the
+          processes you entered, to show how the forecast arrivals would
+          delay them.
+        </p>
+      </div>
     </section>
 
   </section>

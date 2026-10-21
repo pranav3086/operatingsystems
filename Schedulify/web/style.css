@@ -1067,6 +1067,157 @@ tr.row-done td:first-child::after {
 .footer code { font-style: normal; }
 
 
+/* ───────────────────────── predictive analysis ──────────────────── */
+
+/* Predicted processes are told apart by shape and line style -- a dashed
+ * outline, a hollow arrival mark, a "forecast" tag -- never by hue alone,
+ * so the blue state ramp keeps meaning exactly what it means elsewhere. */
+
+.field {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 132px);
+  gap: 10px; align-items: center; font-size: 14.5px; color: var(--ink-2);
+}
+.field-stack { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field-pair .field { grid-template-columns: auto minmax(0, 1fr); gap: 7px; }
+
+.forecast { display: grid; gap: 12px; align-content: start; }
+/* grid items default to min-width:auto, so a wide table would otherwise
+ * stretch the panel instead of scrolling inside its .table-scroll */
+.forecast > *, .fc-grid > * { min-width: 0; }
+.forecast .micro-title { margin-bottom: 0; }
+.forecast .micro-title.spaced { margin-top: 10px; }
+.forecast-lede { margin: 0; font-size: 15px; color: var(--ink-2);
+                 line-height: 1.45; }
+.forecast-lede em { font-style: italic; font-weight: 700; color: var(--ink); }
+
+.warnings { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.warnings li, .stale-note {
+  position: relative; margin: 0;
+  font-size: 14px; line-height: 1.45; color: var(--ink-2);
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline); border-left: 3px solid var(--ink-2);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px 8px 34px;
+  animation: fade-up var(--dur-mid) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 10) * 40ms);
+}
+.warnings li::before, .stale-note::before {
+  content: "\26a0"; position: absolute; left: 11px; top: 7px;
+  color: var(--ink); font-size: 15px;
+}
+.stale-note { font-weight: 700; color: var(--ink); }
+
+/* legend swatches for the arrival chart */
+.sw-obs     { border-radius: 50%; background: var(--proc); }
+.sw-pred    { border-radius: 50%; background: var(--surface);
+              box-shadow: inset 0 0 0 2px var(--proc-run); }
+.sw-window  { background: var(--accent-wash);
+              box-shadow: inset 0 0 0 1px var(--accent); }
+.sw-horizon { background: var(--surface-sunken);
+              background-image: repeating-linear-gradient(45deg,
+                var(--ink-muted) 0 1px, transparent 1px 4px); }
+
+.fc-arrivals-wrap { position: relative; }
+.fc-arrivals {
+  position: relative;
+  height: calc(24px + var(--levels, 1) * 12px);
+  background: var(--surface-sunken);
+  border: 1px solid var(--hairline); border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 3px rgba(8, 20, 28, .07);
+  /* visible, so a mark exactly on the first or last instant is not cut in half */
+  overflow: visible;
+}
+.fc-band { position: absolute; top: 0; bottom: 0; }
+.fc-band-window {
+  background: var(--accent-wash);
+  border-left: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  border-right: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+}
+.fc-band-horizon {
+  background-image: repeating-linear-gradient(45deg,
+    color-mix(in oklab, var(--ink-muted) 42%, transparent) 0 1px,
+    transparent 1px 7px);
+  border-left: 1px dashed var(--ink-muted);
+}
+.arr-dot {
+  position: absolute; z-index: 2;
+  bottom: calc(6px + var(--lvl, 0) * 12px);
+  width: 11px; height: 11px; margin-left: -5.5px; border-radius: 50%;
+  background: var(--proc);
+  box-shadow: 0 0 0 1.5px var(--surface-sunken);
+  animation: pop var(--dur-mid) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 24) * 18ms);
+}
+.arr-dot.predicted {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 2px var(--proc-run),
+              0 0 0 1.5px var(--surface-sunken);
+}
+.arr-dot:hover { transform: scale(1.3); }
+
+.fc-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+           gap: 22px; align-items: start; }
+@media (max-width: 900px) { .fc-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.pmf {
+  display: flex; align-items: flex-end; gap: 2px;
+  height: 128px; padding: 0 2px;
+  border-bottom: 1px solid var(--baseline);
+}
+.pmf-bar {
+  flex: 1 1 0; min-width: 2px; border-radius: 3px 3px 0 0;
+  background: var(--proc);
+  transform-origin: bottom;
+  animation: grow-up var(--dur-slow) var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 40) * 12ms);
+}
+.pmf-bar.out   { background: var(--proc-soft); }
+.pmf-bar.drawn { background: var(--proc-run);
+                 box-shadow: 0 0 0 1.5px var(--ink); }
+.pmf-axis { position: relative; height: 22px; margin-top: 3px; }
+.pmf-axis span { position: absolute; transform: translateX(-50%);
+                 font-size: 12.5px; color: var(--ink-muted);
+                 font-variant-numeric: tabular-nums; }
+
+table.diag td:last-child, table.diag th:last-child {
+  text-align: left; white-space: normal;
+}
+table.diag td:first-child { white-space: normal; min-width: 9em; }
+
+.tag {
+  display: inline-block; margin-left: 7px; vertical-align: 1px;
+  padding: 0 6px; border: 1px dashed var(--ink-muted); border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ink-2);
+  font-style: normal;
+}
+
+/* predicted processes on the shared timeline */
+.seg.predicted::after {
+  content: ""; position: absolute; inset: 2px; z-index: 2;
+  border: 1.5px dashed var(--ink); border-radius: var(--bar-radius);
+  opacity: .6; pointer-events: none;
+}
+.tag-lane { margin: 1px 0 0; font-size: 10px; padding: 0 5px; }
+.lane.predicted .lane-track { border-style: dashed; border-color: var(--ink-muted); }
+
+.view-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.view-toggle .btn[aria-pressed="true"] {
+  background: var(--accent-wash); border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+td.change { font-weight: 700; }
+.change-word { margin-left: 7px; font-weight: 400; font-style: italic;
+               font-size: 13px; color: var(--ink-muted); }
+
+@keyframes grow-up {
+  from { transform: scaleY(0); }
+  to   { transform: none; }
+}
+
+
 /* ═════════════════════════════ motion ═════════════════════════════
  *
  * Every keyframe below animates only opacity, transform, clip-path or a
@@ -1155,6 +1306,7 @@ tr.row-done td:first-child::after {
 .controls > :nth-child(4) { animation-delay: 275ms; }
 .controls > :nth-child(5) { animation-delay: 320ms; }
 .controls > :nth-child(6) { animation-delay: 365ms; }
+.controls > :nth-child(7) { animation-delay: 410ms; }
 
 .algo { animation: fade-up var(--dur-mid) var(--ease-out) backwards;
         animation-delay: calc(200ms + min(var(--i, 0), 8) * 40ms); }
@@ -1164,7 +1316,7 @@ tr.row-done td:first-child::after {
 /* The result panels animate when #result-view stops being [hidden]; the
  * contents below re-animate on every run, because each run rebuilds the
  * segments, lanes, tiles, rows and trace lines from scratch. */
-#result-view > *, #compare-view {
+#result-view > *, #compare-view, #forecast-view {
   animation: rise var(--dur-slow) var(--ease-out) backwards;
 }
 #result-view > :nth-child(1) { animation-delay: 0ms; }

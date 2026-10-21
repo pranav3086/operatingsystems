@@ -18,10 +18,18 @@
  *   GET  /api/examples     the predefined workloads
  *   POST /api/simulate     one algorithm   -> one result
  *   POST /api/compare      all six         -> six results
+ *   POST /api/forecast     workload        -> statistics + predicted processes
+ *   POST /api/forecast/simulate
+ *                          workload + predicted -> both schedules + comparison
  *
- * Request body for both POST routes:
+ * Request body for the simulate and compare routes:
  *   { "algorithm": "srtf", "quantum": 2,
  *     "processes": [ { "id":"P1","arrival":0,"burst":7,"priority":2 }, ... ] }
+ *
+ * /api/forecast takes "processes" plus optional "horizon",
+ * "observationStart", "observationEnd", "maxGenerated" and "seed" (see
+ * predict.h). /api/forecast/simulate takes the simulate body plus the
+ * "predicted" array /api/forecast returned.
  */
 #ifndef SCHEDULIFY_WEBAPP_H
 #define SCHEDULIFY_WEBAPP_H

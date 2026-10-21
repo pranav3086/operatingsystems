@@ -63,12 +63,12 @@ CORE_SRC := src/process.c src/validate.c src/ui.c src/table.c \
             src/algorithms.c src/sched_fcfs.c src/sched_sjf.c \
             src/sched_priority.c src/sched_rr.c src/metrics.c \
             src/visualize.c src/compare.c src/csvio.c src/datasets.c \
-            src/stepmode.c src/json.c src/http.c src/webapp.c \
-            src/serve.c
+            src/stepmode.c src/predict.c src/json.c src/http.c \
+            src/webapp.c src/serve.c
 APP_SRC  := $(CORE_SRC) src/main.c
 TEST_SRC := $(CORE_SRC) tests/test_util.c tests/test_validation.c \
-            tests/test_metrics.c tests/test_algorithms.c tests/test_csvio.c tests/test_web.c \
-            tests/test_main.c
+            tests/test_metrics.c tests/test_algorithms.c tests/test_csvio.c \
+            tests/test_web.c tests/test_predict.c tests/test_main.c
 
 APP_OBJ  := $(APP_SRC:%.c=$(OBJ)/%.o)
 TEST_OBJ := $(TEST_SRC:%.c=$(OBJ)/%.o)

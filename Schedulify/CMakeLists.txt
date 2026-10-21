@@ -43,6 +43,7 @@ add_library(schedulify_core STATIC
   src/csvio.c
   src/datasets.c
   src/stepmode.c
+  src/predict.c
   src/json.c
   src/http.c
   src/webapp.c
@@ -117,6 +118,7 @@ add_executable(schedulify_tests
   tests/test_algorithms.c
   tests/test_csvio.c
   tests/test_web.c
+  tests/test_predict.c
   tests/test_main.c)
 target_link_libraries(schedulify_tests PRIVATE schedulify_core)
 target_include_directories(schedulify_tests PRIVATE tests)

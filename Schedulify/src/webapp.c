@@ -12,6 +12,7 @@
 #include "datasets.h"
 #include "json.h"
 #include "metrics.h"
+#include "predict.h"
 #include "process.h"
 #include "validate.h"
 
@@ -229,7 +230,9 @@ static void write_algorithm(Json *j, AlgorithmId id, int quantum)
     json_obj_end(j);
 }
 
-static void write_schedule(Json *j, const Schedule *sch)
+/* predicted_from: index of the first predicted process, or -1 when the
+ * workload is entirely user-entered. The merge keeps originals first. */
+static void write_schedule(Json *j, const Schedule *sch, int predicted_from)
 {
     int i;
 
@@ -262,6 +265,8 @@ static void write_schedule(Json *j, const Schedule *sch)
         json_kv_int(j, "turnaround", s->turnaround);
         json_kv_int(j, "waiting", s->waiting);
         json_kv_int(j, "response", s->response);
+        json_kv_bool(j, "predicted",
+                     predicted_from >= 0 && i >= predicted_from);
         json_obj_end(j);
     }
     json_arr_end(j);
@@ -312,13 +317,77 @@ static void write_schedule(Json *j, const Schedule *sch)
 
 /* ------------------------------------------------- JSON -> workload ---- */
 
+/* Reads an array of process objects into ds (already initialised), through
+ * the same validate.c predicates the keyboard and the CSV importer use.
+ * `what` names the list in messages ("process", "predicted process"). */
+static bool read_processes(const JsonValue *arr, Dataset *ds,
+                           const char *what, char *err, size_t errsz)
+{
+    int n = json_len(arr), i;
+
+    if (n > MAX_PROCESSES) {
+        snprintf(err, errsz, "at most %d processes are supported",
+                 MAX_PROCESSES);
+        return false;
+    }
+
+    for (i = 0; i < n; i++) {
+        const JsonValue *o = json_at(arr, i);
+        Process p;
+        char sub[JSON_ERR_MAX - 48];   /* leaves room for the "process N: " prefix */
+
+        memset(&p, 0, sizeof p);
+        if (json_type(o) != JSON_OBJECT) {
+            snprintf(err, errsz, "%s %d is not an object", what, i + 1);
+            return false;
+        }
+        if (!json_member_str(o, "id", p.id, sizeof p.id)) {
+            snprintf(err, errsz,
+                     "%s %d needs an \"id\" string of at most %d "
+                     "characters", what, i + 1, PROC_ID_MAX - 1);
+            return false;
+        }
+        if (!json_member_int(o, "arrival", &p.arrival)) {
+            snprintf(err, errsz, "%s %s: \"arrival\" must be a whole "
+                                 "number", what, p.id);
+            return false;
+        }
+        if (!json_member_int(o, "burst", &p.burst)) {
+            snprintf(err, errsz, "%s %s: \"burst\" must be a whole "
+                                 "number", what, p.id);
+            return false;
+        }
+        if (json_get(o, "priority") != NULL) {
+            if (!json_member_int(o, "priority", &p.priority)) {
+                snprintf(err, errsz, "%s %s: \"priority\" must be a "
+                                     "whole number", what, p.id);
+                return false;
+            }
+        }
+
+        if (!validate_process(&p, sub, sizeof sub)) {
+            snprintf(err, errsz, "%s %d: %s", what, i + 1, sub);
+            return false;
+        }
+        if (dataset_find_id(ds, p.id) >= 0) {
+            snprintf(err, errsz, "duplicate process id \"%s\"", p.id);
+            return false;
+        }
+        if (!dataset_add(ds, &p)) {
+            snprintf(err, errsz, "out of memory");
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool read_workload(const JsonValue *root, Dataset *ds,
                           AlgorithmId *algo, int *quantum,
                           char *err, size_t errsz)
 {
     const JsonValue *arr;
     char name[32];
-    int n, i;
+    int n;
 
     dataset_init(ds, "dashboard");
 
@@ -359,62 +428,82 @@ static bool read_workload(const JsonValue *root, Dataset *ds,
         snprintf(err, errsz, "add at least one process");
         return false;
     }
-    if (n > MAX_PROCESSES) {
-        snprintf(err, errsz, "at most %d processes are supported",
-                 MAX_PROCESSES);
+    if (!read_processes(arr, ds, "process", err, errsz)) return false;
+    if (!validate_dataset(ds, err, errsz)) return false;
+    return true;
+}
+
+/* Reads the optional forecast settings. Absent keys keep the defaults
+ * (inferred window, horizon = window length, no cap, seed 42); a key that
+ * is present must be valid -- nothing is silently replaced. */
+static bool read_forecast_config(const JsonValue *root, ForecastConfig *cfg,
+                                 char *err, size_t errsz)
+{
+    bool has_start = json_get(root, "observationStart") != NULL;
+    bool has_end = json_get(root, "observationEnd") != NULL;
+    int v = 0;
+
+    forecast_config_default(cfg);
+
+    if (json_get(root, "horizon") != NULL) {
+        if (!json_member_int(root, "horizon", &v)) {
+            snprintf(err, errsz, "\"horizon\" must be a whole number");
+            return false;
+        }
+        if (v < 1 || v > MAX_ARRIVAL) {
+            snprintf(err, errsz, "the forecast horizon must be between 1 "
+                     "and %d", MAX_ARRIVAL);
+            return false;
+        }
+        cfg->horizon = v;
+    }
+
+    if (has_start && !has_end) {
+        snprintf(err, errsz, "\"observationEnd\" is required when "
+                 "\"observationStart\" is given");
         return false;
     }
-
-    for (i = 0; i < n; i++) {
-        const JsonValue *o = json_at(arr, i);
-        Process p;
-        char sub[JSON_ERR_MAX - 32];   /* leaves room for the "process N: " prefix */
-
-        memset(&p, 0, sizeof p);
-        if (json_type(o) != JSON_OBJECT) {
-            snprintf(err, errsz, "process %d is not an object", i + 1);
+    if (has_end) {
+        cfg->mode = OBS_EXPLICIT;
+        cfg->obs_start = MIN_ARRIVAL;     /* the simulator's time origin */
+        if (has_start && !json_member_int(root, "observationStart",
+                                          &cfg->obs_start)) {
+            snprintf(err, errsz, "\"observationStart\" must be a whole "
+                     "number");
             return false;
         }
-        if (!json_member_str(o, "id", p.id, sizeof p.id)) {
-            snprintf(err, errsz,
-                     "process %d needs an \"id\" string of at most %d "
-                     "characters", i + 1, PROC_ID_MAX - 1);
-            return false;
-        }
-        if (!json_member_int(o, "arrival", &p.arrival)) {
-            snprintf(err, errsz, "process %s: \"arrival\" must be a whole "
-                                 "number", p.id);
-            return false;
-        }
-        if (!json_member_int(o, "burst", &p.burst)) {
-            snprintf(err, errsz, "process %s: \"burst\" must be a whole "
-                                 "number", p.id);
-            return false;
-        }
-        if (json_get(o, "priority") != NULL) {
-            if (!json_member_int(o, "priority", &p.priority)) {
-                snprintf(err, errsz, "process %s: \"priority\" must be a "
-                                     "whole number", p.id);
-                return false;
-            }
-        }
-
-        /* The same predicates the keyboard and the CSV importer use. */
-        if (!validate_process(&p, sub, sizeof sub)) {
-            snprintf(err, errsz, "process %d: %s", i + 1, sub);
-            return false;
-        }
-        if (dataset_find_id(ds, p.id) >= 0) {
-            snprintf(err, errsz, "duplicate process id \"%s\"", p.id);
-            return false;
-        }
-        if (!dataset_add(ds, &p)) {
-            snprintf(err, errsz, "out of memory");
+        if (!json_member_int(root, "observationEnd", &cfg->obs_end)) {
+            snprintf(err, errsz, "\"observationEnd\" must be a whole number");
             return false;
         }
     }
 
-    if (!validate_dataset(ds, err, errsz)) return false;
+    if (json_get(root, "maxGenerated") != NULL) {
+        if (!json_member_int(root, "maxGenerated", &v)) {
+            snprintf(err, errsz, "\"maxGenerated\" must be a whole number");
+            return false;
+        }
+        if (v < 1) {
+            snprintf(err, errsz, "the cap on predicted processes must be at "
+                     "least 1 (leave it out for no cap)");
+            return false;
+        }
+        cfg->max_generated = v;
+    }
+
+    if (json_get(root, "seed") != NULL) {
+        if (!json_member_int(root, "seed", &v)) {
+            snprintf(err, errsz, "\"seed\" must be a whole number between 0 "
+                     "and %ld", PREDICT_MAX_SEED);
+            return false;
+        }
+        if (v < 0) {
+            snprintf(err, errsz, "the seed must be between 0 and %ld",
+                     PREDICT_MAX_SEED);
+            return false;
+        }
+        cfg->seed = (long)v;
+    }
     return true;
 }
 
@@ -554,7 +643,7 @@ static void route_simulate(const char *body, HttpResponse *res)
     }
 
     json_init(&j);
-    write_schedule(&j, &sch);
+    write_schedule(&j, &sch, -1);
     finish_json(&j, res);
 
     schedule_free(&sch);
@@ -594,7 +683,7 @@ static void route_compare(const char *body, HttpResponse *res)
 
         if (algo_run(&sch, &ds, (AlgorithmId)i, quantum, false, rerr,
                      sizeof rerr)) {
-            write_schedule(&j, &sch);
+            write_schedule(&j, &sch, -1);
         } else {
             json_obj_begin(&j);
             json_key(&j, "algorithm");
@@ -610,6 +699,343 @@ static void route_compare(const char *body, HttpResponse *res)
     finish_json(&j, res);
 
     dataset_free(&ds);
+}
+
+/* ---------------------------------------------------------- forecast -- */
+
+static void write_process_list(Json *j, const Dataset *ds, bool predicted)
+{
+    int i;
+    json_arr_begin(j);
+    for (i = 0; i < ds->count; i++) {
+        json_obj_begin(j);
+        json_kv_str(j, "id", ds->items[i].id);
+        json_kv_int(j, "arrival", ds->items[i].arrival);
+        json_kv_int(j, "burst", ds->items[i].burst);
+        json_kv_int(j, "priority", ds->items[i].priority);
+        json_kv_bool(j, "predicted", predicted);
+        json_obj_end(j);
+    }
+    json_arr_end(j);
+}
+
+/* A p-value or other optional statistic: null when it could not be run. */
+static void kv_maybe(Json *j, const char *key, bool valid, double v, int dp)
+{
+    json_key(j, key);
+    if (valid) json_double(j, v, dp);
+    else json_null(j);
+}
+
+/* The Poisson(lambda*h) mass around its centre, for the count chart. At
+ * most 61 bars: for a large mean that is the central band, which is where
+ * the mass is. */
+static void write_pmf(Json *j, double mu)
+{
+    int lo = predict_poisson_quantile(0.001, mu);
+    int hi = predict_poisson_quantile(0.999, mu);
+    int k;
+
+    if (lo < 0 || hi < 0) { json_arr_begin(j); json_arr_end(j); return; }
+    if (hi - lo > 60) {
+        int centre = (int)mu;
+        lo = (centre - 30 > lo) ? centre - 30 : lo;
+        hi = lo + 60;
+    }
+    json_arr_begin(j);
+    for (k = lo; k <= hi; k++) {
+        json_obj_begin(j);
+        json_kv_int(j, "k", k);
+        json_kv_double(j, "p", predict_poisson_pmf(k, mu), 6);
+        json_obj_end(j);
+    }
+    json_arr_end(j);
+}
+
+static void route_forecast(const char *body, HttpResponse *res)
+{
+    JsonValue *root = NULL;
+    char err[JSON_ERR_MAX];
+    Dataset ds, pred;
+    ForecastConfig cfg;
+    ForecastResult fr;
+    int quantum = DEFAULT_QUANTUM;
+    Json j;
+    int i;
+
+    if (!json_parse(body, &root, err, sizeof err)) {
+        http_respond_json_error(res, 400, err);
+        return;
+    }
+    if (!read_workload(root, &ds, NULL, &quantum, err, sizeof err)
+        || !read_forecast_config(root, &cfg, err, sizeof err)) {
+        json_free(root);
+        dataset_free(&ds);
+        http_respond_json_error(res, 400, err);
+        return;
+    }
+    json_free(root);
+
+    if (!forecast_run(&ds, &cfg, &pred, &fr, err, sizeof err)) {
+        dataset_free(&pred);
+        dataset_free(&ds);
+        http_respond_json_error(res, 400, err);
+        return;
+    }
+
+    json_init(&j);
+    json_obj_begin(&j);
+
+    json_key(&j, "observation");
+    json_obj_begin(&j);
+    json_kv_str(&j, "mode", fr.mode == OBS_EXPLICIT ? "explicit"
+                                                    : "arrival-gaps");
+    json_kv_int(&j, "start", fr.obs_start);
+    json_kv_int(&j, "end", fr.obs_end);
+    json_kv_int(&j, "duration", fr.exposure);
+    json_kv_int(&j, "processes", fr.processes);
+    json_kv_int(&j, "events", fr.observed_events);
+    json_kv_int(&j, "intervals", fr.intervals);
+    kv_maybe(&j, "meanGap", fr.intervals > 0, fr.mean_gap, 4);
+    json_kv_str(&j, "assumption", fr.assumption);
+    json_obj_end(&j);
+
+    json_key(&j, "rate");
+    json_obj_begin(&j);
+    json_kv_double(&j, "lambda", fr.lambda, 6);
+    json_kv_double(&j, "standardError", fr.lambda_se, 6);
+    json_obj_end(&j);
+
+    json_key(&j, "forecast");
+    json_obj_begin(&j);
+    json_kv_int(&j, "horizon", fr.horizon);
+    json_kv_int(&j, "start", fr.forecast_start);
+    json_kv_int(&j, "end", fr.forecast_end);
+    json_kv_double(&j, "expected", fr.expected, 4);
+    json_kv_double(&j, "pZero", fr.p_zero, 6);
+    json_kv_double(&j, "pAtLeastOne", fr.p_at_least_one, 6);
+    json_key(&j, "range90");
+    json_obj_begin(&j);
+    json_kv_int(&j, "low", fr.range_low);
+    json_kv_int(&j, "high", fr.range_high);
+    json_obj_end(&j);
+    json_key(&j, "pmf");
+    write_pmf(&j, fr.expected);
+    json_kv_int(&j, "cap", fr.cap);
+    json_kv_bool(&j, "capFromUser", fr.cap_from_user);
+    json_kv_double(&j, "pCapExceeded", fr.p_cap_exceeded, 6);
+    json_kv_int(&j, "generated", fr.generated);
+    json_kv_bool(&j, "truncated", fr.truncated);
+    json_kv_int(&j, "tiedArrivals", fr.tied_arrivals);
+    json_obj_end(&j);
+
+    json_key(&j, "bursts");
+    json_obj_begin(&j);
+    json_kv_double(&j, "mean", fr.burst_mean, 4);
+    kv_maybe(&j, "sd", fr.burst_sd_valid, fr.burst_sd, 4);
+    json_kv_int(&j, "min", fr.burst_min);
+    json_kv_int(&j, "max", fr.burst_max);
+    json_kv_int(&j, "distinct", fr.burst_distinct);
+    json_kv_int(&j, "samples", fr.processes);
+    json_obj_end(&j);
+
+    json_key(&j, "priorities");
+    json_obj_begin(&j);
+    json_kv_int(&j, "min", fr.priority_min);
+    json_kv_int(&j, "max", fr.priority_max);
+    json_kv_int(&j, "distinct", fr.priority_distinct);
+    json_obj_end(&j);
+
+    json_key(&j, "stability");
+    json_obj_begin(&j);
+    json_kv_int(&j, "simultaneousArrivals", fr.simultaneous);
+    json_kv_int(&j, "testEvents", fr.test_events);
+    json_key(&j, "split");
+    json_obj_begin(&j);
+    json_kv_bool(&j, "valid", fr.split_valid);
+    json_kv_int(&j, "minEvents", PREDICT_SPLIT_MIN);
+    if (fr.split_valid) {
+        json_kv_int(&j, "firstCount", fr.split_first);
+        json_kv_int(&j, "secondCount", fr.split_second);
+        json_kv_double(&j, "firstRate", fr.split_rate_first, 6);
+        json_kv_double(&j, "secondRate", fr.split_rate_second, 6);
+        json_kv_double(&j, "pValue", fr.split_p, 6);
+    }
+    json_obj_end(&j);
+    json_key(&j, "dispersion");
+    json_obj_begin(&j);
+    json_kv_bool(&j, "valid", fr.disp_valid);
+    json_kv_int(&j, "minEvents", PREDICT_DISP_MIN);
+    if (fr.disp_valid) {
+        json_kv_int(&j, "bins", fr.disp_bins);
+        json_kv_double(&j, "varianceToMean", fr.disp_vmr, 4);
+        json_kv_double(&j, "pOver", fr.disp_p_over, 6);
+        json_kv_double(&j, "pUnder", fr.disp_p_under, 6);
+    }
+    json_obj_end(&j);
+    json_obj_end(&j);
+
+    json_kv_int(&j, "seed", fr.seed);
+
+    json_key(&j, "warnings");
+    json_arr_begin(&j);
+    for (i = 0; i < fr.warn_count; i++) json_str(&j, fr.warnings[i]);
+    json_arr_end(&j);
+
+    json_key(&j, "predicted");
+    write_process_list(&j, &pred, true);
+
+    json_obj_end(&j);
+    finish_json(&j, res);
+
+    dataset_free(&pred);
+    dataset_free(&ds);
+}
+
+/* Averages over the first n processes only -- how the user's own processes
+ * fare once the forecast arrivals compete with them. */
+static void subset_averages(const Schedule *sch, int n, double *wt,
+                            double *tat, double *rt)
+{
+    long w = 0, t = 0, r = 0;
+    int i;
+    for (i = 0; i < n && i < sch->n; i++) {
+        w += sch->stats[i].waiting;
+        t += sch->stats[i].turnaround;
+        r += sch->stats[i].response;
+    }
+    *wt = (n > 0) ? (double)w / n : 0.0;
+    *tat = (n > 0) ? (double)t / n : 0.0;
+    *rt = (n > 0) ? (double)r / n : 0.0;
+}
+
+static void write_comparison_row(Json *j, const char *key, const char *label,
+                                 double before, double after, int dp,
+                                 const char *better)
+{
+    json_obj_begin(j);
+    json_kv_str(j, "key", key);
+    json_kv_str(j, "label", label);
+    json_kv_double(j, "original", before, dp);
+    json_kv_double(j, "augmented", after, dp);
+    json_kv_double(j, "change", after - before, dp);
+    json_kv_str(j, "better", better);
+    json_kv_int(j, "decimals", dp);
+    json_obj_end(j);
+}
+
+static void route_forecast_simulate(const char *body, HttpResponse *res)
+{
+    JsonValue *root = NULL;
+    const JsonValue *parr;
+    char err[JSON_ERR_MAX];
+    Dataset ds, pred, merged;
+    AlgorithmId algo = ALGO_FCFS;
+    int quantum = DEFAULT_QUANTUM;
+    Schedule orig, aug;
+    double ow, ot, orr, aw, at, ar;
+    Json j;
+
+    dataset_init(&pred, "forecast");
+    dataset_init(&merged, "observed + forecast");
+    memset(&orig, 0, sizeof orig);
+    memset(&aug, 0, sizeof aug);
+
+    if (!json_parse(body, &root, err, sizeof err)) {
+        http_respond_json_error(res, 400, err);
+        return;
+    }
+    if (!read_workload(root, &ds, &algo, &quantum, err, sizeof err)) {
+        goto bad;
+    }
+    parr = json_get(root, "predicted");
+    if (json_type(parr) != JSON_ARRAY) {
+        snprintf(err, sizeof err, "\"predicted\" must be an array (generate "
+                 "a forecast first)");
+        goto bad;
+    }
+    if (!read_processes(parr, &pred, "predicted process", err, sizeof err)
+        || !forecast_merge(&ds, &pred, &merged, err, sizeof err)) {
+        goto bad;
+    }
+    json_free(root);
+    root = NULL;
+
+    /* The unchanged engine, twice: the user's workload and the same
+     * workload with the forecast arrivals appended. */
+    if (!algo_run(&orig, &ds, algo, quantum, true, err, sizeof err)
+        || !algo_run(&aug, &merged, algo, quantum, true, err, sizeof err)) {
+        goto bad;
+    }
+
+    subset_averages(&orig, ds.count, &ow, &ot, &orr);
+    subset_averages(&aug, ds.count, &aw, &at, &ar);
+
+    json_init(&j);
+    json_obj_begin(&j);
+    json_kv_int(&j, "originalCount", ds.count);
+    json_kv_int(&j, "predictedCount", pred.count);
+
+    json_key(&j, "original");
+    write_schedule(&j, &orig, -1);
+    json_key(&j, "augmented");
+    write_schedule(&j, &aug, ds.count);
+
+    json_key(&j, "comparison");
+    json_arr_begin(&j);
+    write_comparison_row(&j, "avgWaiting", "Avg waiting (all processes)",
+                         orig.avg_waiting, aug.avg_waiting, 2, "lower");
+    write_comparison_row(&j, "avgTurnaround",
+                         "Avg turnaround (all processes)",
+                         orig.avg_turnaround, aug.avg_turnaround, 2,
+                         "lower");
+    write_comparison_row(&j, "avgResponse", "Avg response (all processes)",
+                         orig.avg_response, aug.avg_response, 2, "lower");
+    write_comparison_row(&j, "origAvgWaiting",
+                         "Avg waiting (your original processes)",
+                         ow, aw, 2, "lower");
+    write_comparison_row(&j, "origAvgTurnaround",
+                         "Avg turnaround (your original processes)",
+                         ot, at, 2, "lower");
+    write_comparison_row(&j, "origAvgResponse",
+                         "Avg response (your original processes)",
+                         orr, ar, 2, "lower");
+    write_comparison_row(&j, "cpuUtilization", "CPU utilisation %",
+                         orig.cpu_utilization, aug.cpu_utilization, 2,
+                         "higher");
+    write_comparison_row(&j, "throughput", "Throughput (per unit)",
+                         orig.throughput, aug.throughput, 4, "higher");
+    write_comparison_row(&j, "contextSwitches", "Context switches",
+                         orig.context_switches, aug.context_switches, 0,
+                         "lower");
+    write_comparison_row(&j, "preemptions", "Preemptions",
+                         orig.preemptions, aug.preemptions, 0, "lower");
+    write_comparison_row(&j, "idleTime", "CPU idle (units)",
+                         orig.idle_time, aug.idle_time, 0, "lower");
+    write_comparison_row(&j, "totalTime", "Makespan (units)",
+                         orig.total_time, aug.total_time, 0, "lower");
+    write_comparison_row(&j, "processes", "Processes",
+                         orig.n, aug.n, 0, "none");
+    json_arr_end(&j);
+
+    json_obj_end(&j);
+    finish_json(&j, res);
+
+    schedule_free(&orig);
+    schedule_free(&aug);
+    dataset_free(&merged);
+    dataset_free(&pred);
+    dataset_free(&ds);
+    return;
+
+bad:
+    json_free(root);
+    schedule_free(&orig);
+    schedule_free(&aug);
+    dataset_free(&merged);
+    dataset_free(&pred);
+    dataset_free(&ds);
+    http_respond_json_error(res, 400, err);
 }
 
 /* ------------------------------------------------------------- dispatch */
@@ -638,6 +1064,16 @@ void webapp_route(WebApp *app, const char *method, const char *path,
     if (strcmp(path, "/api/compare") == 0) {
         if (!is_post) { http_respond_json_error(res, 405, "use POST"); return; }
         route_compare(body, res);
+        return;
+    }
+    if (strcmp(path, "/api/forecast") == 0) {
+        if (!is_post) { http_respond_json_error(res, 405, "use POST"); return; }
+        route_forecast(body, res);
+        return;
+    }
+    if (strcmp(path, "/api/forecast/simulate") == 0) {
+        if (!is_post) { http_respond_json_error(res, 405, "use POST"); return; }
+        route_forecast_simulate(body, res);
         return;
     }
 

@@ -34,6 +34,7 @@ reimplementation of it.
 
 - [What it does](#what-it-does)
 - [The dashboard](#the-dashboard)
+- [Predictive workload analysis](#predictive-workload-analysis)
 - [Build and run](#build-and-run)
 - [Using it](#using-it)
 - [HTTP API](#http-api)
@@ -74,6 +75,12 @@ entry, a reproducible random generator, and CSV import.
 segment list, the process table with an averages row, the metric summary, a
 six-way comparison table that marks the winner in every column, and a
 plain-language verdict.
+
+**Predictive analysis** — a statistically generated possible continuation
+of the current workload (Poisson arrivals, resampled bursts), with its
+assumptions and stability diagnostics, scheduled by the same six algorithms
+and compared against the original. See
+[Predictive workload analysis](#predictive-workload-analysis).
 
 **Modes** — the browser dashboard; a menu-driven terminal UI; run one
 algorithm; compare all six on the same workload; or walk a run one scheduling
@@ -138,6 +145,432 @@ Robin minimises response time at the cost of extra switches.
 Light and dark themes both ship, following the system setting unless you
 override it.
 
+## Predictive workload analysis
+
+The **Predictive analysis** block in the dashboard looks at the workload on
+screen and asks: *if processes keep arriving the way these did, what might
+arrive next, and how would each scheduling algorithm cope?* It estimates how
+often processes arrive, generates one statistically plausible continuation of
+the workload, and runs the original and the extended workload through the
+same, unchanged schedulers so the two can be compared side by side.
+
+Nothing comes from outside the simulator: there is no historical dataset, no
+trained model and no prediction service. Every number is computed in C, in
+`src/predict.c`, from the processes you entered. The browser only displays
+what the engine returns, exactly as it does for ordinary simulations.
+
+### Why it is useful
+
+A scheduler that looks good on a fixed list of processes can behave very
+differently once more work keeps arriving. The forecast lets you see, for the
+same algorithm:
+
+- how much the **original** processes are delayed by work that arrives after
+  them. Under SRTF, for example, a short newcomer can jump ahead of a long job
+  that was already waiting;
+- how CPU utilization, throughput, idle time and context switches change
+  under more load;
+- how uncertain the forecast is. The count model shows the whole range of
+  plausible arrival counts, not just one number.
+
+It also teaches the statistics that queueing theory and OS textbooks rely on:
+Poisson arrivals, exponential inter-arrival times and resampling. Every step
+is visible and every assumption is printed.
+
+### Using it, step by step
+
+1. **Enter or load a workload** in the process editor as usual. At least two
+   processes with different arrival times are needed unless you enter an
+   observation window (step 3).
+2. **Forecast horizon** — how many time units into the future to forecast.
+   Leave it blank to use the same length as the observation window.
+3. **Observation window** — choose *Infer from arrival gaps* (the default) or
+   *I know the window* and enter `from t =` / `to t =`. See
+   [the observation window](#the-observation-window) below for what this
+   changes.
+4. **Cap** (optional) — the most predicted processes to generate. Leave it
+   blank for no cap other than the engine's total limit of 512 processes.
+5. **Seed** — the random seed (default 42). The same workload, settings and
+   seed always produce exactly the same forecast; change the seed to see
+   another equally plausible future.
+6. Press **Generate forecast**. The results panel shows the assumption made,
+   any warnings, the rate and count model, an arrival chart, the probability
+   chart, the stability diagnostics and the table of predicted processes
+   (`F1`, `F2`, …).
+7. Pick an algorithm in the normal algorithm list and press **Simulate
+   predicted workload**. The timeline plays the extended workload, with the
+   predicted processes dashed and tagged *forecast*. A comparison table shows
+   every metric before and after, and *Original workload* / *With forecast*
+   switch the timeline between the two runs.
+8. **Reset** clears the forecast. It never changes your processes.
+
+If you edit the workload after generating, the forecast is marked
+**out of date** and *Simulate* is blocked until you generate again, so a
+forecast can never be simulated against data it was not computed from.
+Undoing the edit makes it valid again.
+
+### How it works
+
+The whole analysis is one pipeline, run by `forecast_run()` in
+`src/predict.c`:
+
+```
+observed processes
+      │
+      ▼
+1. observation window T  ──►  2. arrival rate λ = N / T  (+ standard error)
+                                      │
+                                      ▼
+                     3. count model K ~ Poisson(λh) over the horizon h
+                                      │
+                                      ▼
+                     4. arrival times from exponential gaps (seeded RNG)
+                                      │
+                                      ▼
+                     5. burst + priority resampled from observed processes
+                                      │
+                                      ▼
+                     6. diagnostics and warnings on the observed data
+                                      │
+                                      ▼
+            predicted processes F1, F2, …  ──►  7. both workloads scheduled
+                                                   by the same algorithm
+```
+
+#### 1. The observation window
+
+The arrival rate is "arrivals per unit of time", so it needs to know how long
+the system was watched. A `Process` only records *when it arrived*, not how
+long anyone was looking, so the workload cannot tell us that. There are two
+ways to supply it:
+
+| Mode | Window | Events counted | Rate |
+|---|---|---|---|
+| **Infer from arrival gaps** (default) | first arrival → last arrival | the n − 1 gaps between n arrivals | λ = (n − 1) / (last − first) |
+| **I know the window** | the `start`–`end` you enter | all n arrivals | λ = n / (end − start) |
+
+Inferring the window treats the first and last arrivals as its edges. Within
+that span there are exactly n − 1 complete gaps between arrivals, so the rate
+is the number of gaps divided by the time they cover, which is the reciprocal
+of the mean gap. This is the standard estimate when the window is unknown.
+It is still an assumption, so the page prints it with every result, e.g.
+*"No observation window given. Assumed: observation began at the first
+arrival (t=0) and ended at the last (t=5), so lambda = 3 gaps / 5 units."*
+
+Some workloads cannot give a rate, and they are refused with a reason rather
+than given a made-up number:
+
+- **one process** — one arrival has no gaps, so there is nothing to measure;
+- **every process arriving at the same instant** — the gaps total zero time
+  (zero exposure), so λ would be infinite.
+
+In both cases the message asks you to enter the observation window instead.
+With an explicit window, the window must contain every observed arrival and
+must stay within the engine's arrival-time limits. If only `to t =` is given,
+the start is t = 0.
+
+#### 2. The arrival rate and its uncertainty
+
+λ = N / T is the maximum-likelihood estimate of a Poisson process's rate. For
+a Poisson count N its standard error is
+
+```
+SE(λ) = √N / T = λ / √N
+```
+
+so the relative error is 1/√N: about 58% with 3 events, 32% with 10 and 10%
+with 100. The page reports SE(λ). When N < 10 the forecast carries a warning
+that it is **illustrative** and gives that percentage. Most teaching
+workloads (4–8 processes) get this warning, and that is correct: four
+arrivals cannot pin down a rate.
+
+#### 3. The count model — Poisson(λh)
+
+If arrivals form a Poisson process with rate λ, the number K that arrives in a
+horizon of length h follows a Poisson distribution with mean μ = λh:
+
+```
+P(K = k) = μ^k · e^(−μ) / k!          E[K] = Var[K] = μ
+P(K = 0) = e^(−μ)                      P(K ≥ 1) = 1 − e^(−μ)
+```
+
+The engine reports:
+
+- **Expected arrivals** E[K] = μ;
+- **P(no arrivals)** and **P(at least one)**;
+- the **central 90% range**: the 5th and 95th percentiles of Poisson(μ),
+  i.e. the smallest k with P(K ≤ k) ≥ 0.05 and the smallest with
+  P(K ≤ k) ≥ 0.95;
+- the **probability of every count**, drawn as the bar chart (up to 61 bars).
+  Bars outside the 90% range are faint, and the bar for the count this
+  particular draw produced is outlined.
+
+The pmf is computed in log space, as exp(k·ln μ − μ − ln k!) using `lgamma`,
+because μ^k and k! overflow a `double` long before μ gets large. Cumulative
+probabilities are summed only over μ ± 12√μ (+12), outside which the
+probability is below 10⁻³⁰. This keeps them fast and accurate even for
+μ = 10⁶.
+
+#### 4. Arrival times — exponential gaps
+
+In a Poisson process the gaps between arrivals are independent and
+exponentially distributed with mean 1/λ. A gap is generated by inverse
+transform sampling from a uniform random number U in (0, 1):
+
+```
+δ = −ln(U) / λ
+```
+
+Starting at the end of the observation window, gaps are added one after
+another until the running time passes the end of the horizon:
+
+```
+t₀ = window end
+t₁ = t₀ + δ₁,  t₂ = t₁ + δ₂, …   stop at the first tᵢ > window end + h
+```
+
+The number of arrivals that fit is K. This is **one** random process, not
+two: the arrival times are not drawn after first drawing a count. Counting
+exponential gaps until a time limit produces a Poisson(λh) count by
+construction. The Poisson formulas in step 3 describe the distribution this
+count comes from. They are not a second, separate draw.
+
+The simulator's clock is integral, so each arrival time is rounded **up**
+(`ceil`). A time in (end, end + h] therefore becomes a whole number in
+[end + 1, end + h]. Every predicted arrival lands strictly after the observed
+workload and inside the horizon. Rounding can put two predicted processes on
+the same tick; those ties are counted, reported, and settled by each
+scheduler's existing tie-break rule.
+
+**Cap.** If a cap is set and reached before the horizon ends, generation
+stops there. The count is then censored: it no longer follows Poisson(λh).
+The forecast says so and gives the model's probability of that happening,
+P(K > cap) = 1 − P(K ≤ cap). Without a cap the limit is the engine's 512
+processes in total (observed + predicted).
+
+#### 5. Burst times and priorities — the empirical bootstrap
+
+Each predicted process copies the burst time **and** priority of an observed
+process chosen uniformly at random, with replacement. This is the
+nonparametric bootstrap: the observed processes are treated as a sample from
+the true distribution and resampled directly.
+
+- No distribution shape is assumed. Burst times are not forced into a normal
+  or exponential curve, and no predicted process is simply given the mean.
+- Every predicted value is a value that really occurred, so the spread and
+  skew of the workload are preserved.
+- Burst and priority are resampled **as a pair**, so any relationship between
+  them is kept. For example, if short jobs had high priority, predicted short
+  jobs do too. Each one on its own is still a draw from its observed
+  distribution.
+
+The page reports the observed burst mean, sample standard deviation
+(n − 1 denominator), minimum, maximum and number of distinct values, and the
+same for priorities. With one observed process the standard deviation is
+reported as not estimable. If every burst is the same, a warning explains
+that resampling cannot invent values that were never observed.
+
+Predicted processes are named `F1`, `F2`, … in arrival order, skipping any id
+already used in the workload (case-insensitively), so ids never clash. Each
+one passes the same validation as a hand-entered process.
+
+#### 6. Randomness and reproducibility
+
+The predictor has its **own** random number generator, separate from the
+workload generator in `datasets.c`, so forecasting never disturbs anything
+else:
+
+- the seed is mixed through **splitmix64** into a 64-bit state, so nearby
+  seeds such as 1, 2 and 3 give unrelated streams;
+- numbers are drawn with **xorshift64\***;
+- uniforms use 53 random bits centred in their cell, so U is never exactly 0
+  or 1 and −ln(U) is always finite.
+
+The same workload, settings and seed always give the same forecast on every
+platform. The schedulers themselves contain no randomness and are not
+touched, so a fixed workload always schedules the same way.
+
+#### 7. Diagnostics — does the model fit?
+
+The Poisson model assumes arrivals at a **constant rate**, **independently**
+and **one at a time**. The engine checks the observed arrivals against each of
+these assumptions and reports the result, with a warning when one fails:
+
+| Check | What it tests | Method | Needs |
+|---|---|---|---|
+| Sample size | is λ estimated precisely enough? | SE(λ) = λ/√N; warns when N < 10 | — |
+| Rate stability | is the rate the same in both halves of the window? | exact two-sided binomial test, p < 0.05 | 4 events |
+| Dispersion | are arrivals as random as Poisson — not clustered, not too regular? | χ² index of dispersion over equal bins, p < 0.05 either tail | 12 events |
+| Simultaneous arrivals | do any processes arrive together? | count of shared arrival times | — |
+| Burst variety | is there spread to resample? | one sample, or one distinct value | — |
+| Extrapolation | is the horizon far beyond what was observed? | horizon > 3 × window | — |
+
+**Rate stability.** If the rate is constant, each of the m arrivals in the
+window falls in the first half with probability ½, so the count in the first
+half is Binomial(m, ½). The p-value is the total probability of all outcomes
+no more likely than the one observed. A small p means arrivals were clearly
+front- or back-loaded. The page shows both half-window rates.
+
+**Dispersion.** The window is cut into B equal bins, where B = m/3 clamped to
+4–20, and the arrivals in each bin are counted. Poisson counts have
+variance = mean, so the variance-to-mean ratio should be near 1. The
+statistic
+
+```
+D = Σ (cᵢ − c̄)² / c̄   ~   χ²(B − 1)
+```
+
+is tested in **both** tails:
+
+- a large D (ratio ≫ 1) means arrivals are **burstier** than Poisson;
+- a small D (ratio ≪ 1) means they are **more evenly spaced** than Poisson,
+  as in a hand-typed workload with an arrival every 2 units.
+
+The χ² tail probability uses the regularised incomplete gamma function,
+computed by its series or by a Lentz continued fraction depending on the
+argument. The small tail is computed directly, so it does not lose precision.
+
+**Simultaneous arrivals** cannot happen in a continuous-time Poisson process.
+Batch arrivals are common in teaching workloads, so they are reported as a
+sign the workload is not Poisson.
+
+**Which arrivals the checks use.** With an explicit window, every arrival
+counts. When the window was inferred, the first and last arrivals *define*
+the window, so they are not random draws from it. Only the arrivals strictly
+between them are tested.
+
+When a check needs more data than it has, the page says so (e.g. *"not run:
+needs at least 4 arrivals, has 2"*) instead of reporting a meaningless
+p-value. **No confidence
+percentage is ever invented.** Passing a check only means the sample does not
+contradict the model, not that the model is proven correct.
+
+A forecast that produced **zero** arrivals is not an error. It happens with
+probability e^(−μ), and the page says so and suggests another seed or a
+longer horizon.
+
+#### 8. Simulating the forecast
+
+*Simulate predicted workload* sends the original processes and the predicted
+ones to `/api/forecast/simulate`. The engine:
+
+1. runs the selected algorithm on the **original** workload;
+2. merges the original and predicted processes (originals first) and runs the
+   same algorithm on that **augmented** workload;
+3. derives every metric from each timeline with the usual `src/metrics.c` code;
+4. returns both schedules and a comparison table.
+
+| Comparison row | Meaning |
+|---|---|
+| Avg waiting / turnaround / response | over **all** processes in each run |
+| Original processes: avg waiting / turnaround / response | over **your processes only**, in both runs — how much the forecast delays the work that was already there |
+| CPU utilization, throughput, idle time, total time | for the whole run |
+| Context switches, preemptions | for the whole run |
+| Processes | count in each run |
+
+Each row shows the original value, the augmented value and the change,
+labelled *higher*, *lower* or *no change*. The labels carry no judgement,
+because more throughput can be good while more waiting is bad.
+
+The "original processes only" rows matter because the all-process average
+can hide the effect: newcomers with short bursts can pull the overall
+average down while the processes that were already there wait longer.
+
+The predictor never schedules anything itself. It only produces a list of
+processes, which goes through `algo_run()` exactly like a hand-entered
+workload. The six scheduling algorithms were not modified.
+
+### Worked example
+
+The textbook workload `P1(0,7) P2(2,4) P3(4,1) P4(5,4)`
+(id(arrival, burst)), with every setting left at its default:
+
+**Window and rate.** Arrivals at 0, 2, 4, 5. The window is inferred as
+t = 0 → 5 (T = 5), containing 3 gaps:
+
+```
+λ = 3 / 5 = 0.6 arrivals per unit        SE = 0.6 / √3 = 0.346  (58%)
+```
+
+**Count model.** The horizon defaults to the window length, h = 5, so
+μ = 0.6 × 5 = 3:
+
+```
+E[K] = 3
+P(K = 0) = e⁻³ = 0.0498  (4.98%)        P(K ≥ 1) = 95.02%
+cumulative P(K ≤ k):  k=0 0.050  1 0.199  2 0.423  3 0.647  4 0.815  5 0.916  6 0.966
+central 90% range:    1 – 6 arrivals    (first k reaching 0.05, first reaching 0.95)
+```
+
+**Bursts.** Observed 7, 4, 1, 4: mean 4, sample sd = √(18/3) = √6 = 2.45,
+range 1–7, 3 distinct values. Predicted bursts can only be 7, 4 or 1, with
+4 twice as likely as 7 or 1.
+
+**Diagnostics.** With an inferred window only P2 and P3 (2 events) lie
+strictly inside, so the rate-stability check (needs 4) and the dispersion
+check (needs 12) say they cannot run. One warning is raised: *only 3 gaps
+were observed, the rate's standard error is about 58% of the estimate, so
+this forecast is illustrative*.
+
+**Simulation.** Suppose a draw produces one forecast process `F1(6,1)`. Under
+SRTF:
+
+- the overall average waiting time stays at 3.00;
+- the original four processes now average **3.50** instead of 3.00. F1's
+  burst of 1 is the shortest remaining at t = 7, so it runs ahead of P4 and
+  P1, and each of them finishes one unit later;
+- the makespan grows from 16 to 17.
+
+The all-process average hides the delay; the original-processes rows show it.
+
+### Where it lives in the code
+
+| Piece | Location |
+|---|---|
+| Public API and result struct | `include/predict.h` — `ForecastConfig`, `ForecastResult`, `forecast_run()`, `forecast_merge()` |
+| Rate, Poisson pmf/cdf/quantile, exponential gap | `predict_rate()`, `predict_poisson_*()`, `predict_exp_gap()` in `src/predict.c` |
+| Arrival generation | `predict_arrivals()` |
+| Burst summary | `predict_burst_summary()` |
+| Binomial and χ² tests | `predict_binom_two_sided()`, `predict_gamma_p()`, `predict_chi2_sf()` |
+| RNG | `predict_rng_seed()`, `predict_rng_uniform()`, `predict_rng_index()` |
+| HTTP routes | `route_forecast()`, `route_forecast_simulate()` in `src/webapp.c` |
+| Dashboard | the *Predictive analysis* block in `web/index.html`, `generateForecast()` / `simulateForecast()` and the `render*` functions in `web/app.js` |
+| Tests | `tests/test_predict.c` |
+
+The tests check:
+
+- every formula against hand-computed values;
+- the Poisson count over 2000 seeds: its mean, variance, P(0) and 90% range
+  match Poisson(3);
+- that the same seed reproduces the same forecast exactly, and that
+  forecasting does not disturb the `datasets.c` generator;
+- truncation, id clashes and every invalid input;
+- the diagnostics on deliberately front-loaded, evenly spaced and batched
+  workloads;
+- the two routes, including the hand-worked SRTF and FCFS comparisons above,
+  for all six algorithms.
+
+### Limitations
+
+- **The model is a homogeneous Poisson process.** It assumes a constant rate
+  and independent, single arrivals. Real systems have daily cycles, bursts
+  and dependent jobs. The diagnostics can flag clear violations but cannot
+  model them.
+- **Small workloads give weak estimates.** With 4–8 processes the standard
+  error is 35–58% of λ, and the stability checks often lack the data to run.
+  The page says so instead of hiding it.
+- **The observation window is an assumption** unless you enter it, because
+  the data model does not record it.
+- **Each forecast is one draw.** It is a single possible future, not an
+  average over many. Try several seeds to see the spread, which the count
+  model's 90% range also summarises.
+- **Bootstrapping can only repeat observed values.** It never produces a
+  burst time or priority that was not in the workload.
+- **Not validated against real OS traces.** The statistics are checked
+  against theory, not against measured workloads.
+- **Dashboard and HTTP API only.** The terminal menu and command line do not
+  offer forecasting.
+
 ---
 
 ## Build and run
@@ -169,6 +602,15 @@ quickest route is:
 
 ```powershell
 winget install BrechtSanders.WinLibs.POSIX.UCRT --scope user
+```
+
+If `gcc` is still not found in a new terminal, add the package's `mingw64\bin`
+folder to `PATH`. winget puts it under
+`%LOCALAPPDATA%\Microsoft\WinGet\Packages\BrechtSanders.WinLibs…\mingw64\bin`;
+`cmake` is in the same folder. From Git Bash:
+
+```sh
+export PATH="$PATH:$(ls -d "$LOCALAPPDATA"/Microsoft/WinGet/Packages/BrechtSanders.WinLibs*/mingw64/bin | head -1)"
 ```
 
 Then, from PowerShell or `cmd.exe`:
@@ -350,6 +792,8 @@ engine from `curl`, a notebook or your own front end.
 | `/api/examples` | GET | the ten predefined workloads |
 | `/api/simulate` | POST | one finished schedule: timeline, per-process stats, metrics and the decision trace |
 | `/api/compare` | POST | the same, for all six algorithms |
+| `/api/forecast` | POST | rate, Poisson count model, diagnostics, warnings and the predicted processes |
+| `/api/forecast/simulate` | POST | the original and forecast-augmented schedules plus a metric comparison |
 
 Request body for both POST routes (`algorithm` is omitted for `/api/compare`):
 
@@ -375,6 +819,17 @@ curl -s -X POST http://127.0.0.1:8752/api/simulate \
 Every field goes through the same `validate.c` predicates as keyboard and CSV
 input, so a bad request comes back as `400` with the same wording the terminal
 would print: `{"error":"process 1: burst time 0 is outside 1..10000 ..."}`.
+
+`/api/forecast` takes `processes` plus the optional `horizon`,
+`observationStart`, `observationEnd`, `maxGenerated` and `seed`.
+`/api/forecast/simulate` takes the `/api/simulate` body plus the `predicted`
+array that `/api/forecast` returned:
+
+```sh
+curl -s -X POST http://127.0.0.1:8752/api/forecast      -H 'Content-Type: application/json'      -d '{"horizon":10,"seed":42,"processes":[
+          {"id":"P1","arrival":0,"burst":7},{"id":"P2","arrival":2,"burst":4},
+          {"id":"P3","arrival":4,"burst":1},{"id":"P4","arrival":5,"burst":4}]}'
+```
 
 The JSON reader and writer are themselves written in C (`src/json.c`) — the
 rule that nothing about scheduling leaves C applies to the encoding too.
@@ -436,6 +891,7 @@ Schedulify/
 │   ├── csvio.h             CSV import and export
 │   ├── datasets.h          predefined examples + random generator
 │   ├── stepmode.h          step-by-step educational mode
+│   ├── predict.h           statistical predictive workload analysis
 │   ├── ui.h                colors, box glyphs, headings, wrapping
 │   ├── json.h              JSON reader + writer (for the dashboard)
 │   ├── http.h              the tiny loopback HTTP server
@@ -457,6 +913,8 @@ Schedulify/
 │   ├── csvio.c
 │   ├── datasets.c
 │   ├── stepmode.c
+│   ├── predict.c           rate, Poisson/exponential models, bootstrap,
+│   │                       diagnostics, the predictor's own RNG
 │   ├── json.c              JSON codec, in C
 │   ├── http.c              sockets (Winsock / BSD), request parsing
 │   ├── webapp.c            routes, Schedule <-> JSON, static files
@@ -475,6 +933,7 @@ Schedulify/
     ├── test_algorithms.c   hand-calculated schedules for all six
     ├── test_csvio.c        import, export, round trip
     ├── test_web.c          JSON codec + the dashboard's HTTP routes
+    ├── test_predict.c      the predictor and the two forecast routes
     └── test_main.c         runner
 ```
 
@@ -709,7 +1168,7 @@ preemptions**.
 ## Tests and checks
 
 ```sh
-make test            # 1162 assertions across 5 suites
+make test            # 2004 assertions across 6 suites
 make analyze         # GCC static analyser over every source file
 make asan            # ASan + UBSan (Linux/macOS; see below)
 ctest --test-dir build --output-on-failure   # unit tests + 4 CLI smoke tests
@@ -747,6 +1206,18 @@ The suites are:
   timelines read back out of the JSON, eleven bad-request shapes that must
   come back as `400` with a useful message, the method guards, and the
   static-file path traversal defences.
+- **predict** — λ = N/T and zero/invalid exposure; Poisson pmf, cdf and
+  quantiles against hand-computed values, including μ = 0 and μ = 10⁶;
+  exponential gaps (formula, refused inputs, seeded mean and median within
+  stated tolerances); burst mean and sd; the binomial and χ² tails; the
+  textbook forecast end to end; every invalid window, horizon, cap and seed;
+  unique ids even when the workload already uses F1–F3; arrivals inside the
+  horizon and resampled (burst, priority) pairs; bit-identical repeats per
+  seed; over 2000 seeds the generated count matching Poisson(3) in mean,
+  variance and P(K = 0); censoring by a cap and by the process limit; the
+  stability checks on front-loaded, evenly spaced and paired arrivals; the
+  merged workload under all six algorithms; and both routes, including
+  hand-worked original-vs-augmented comparisons and twenty bad requests.
 
 **On sanitizers:** MinGW-w64 on Windows ships no `libasan`/`libubsan`, so
 `-fsanitize=address` cannot link there. `make asan` detects this and tells you
